@@ -11,13 +11,19 @@
     "make": "npm run build && electron-builder",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json"
   },
-  "keywords": ["electron", "playlist", "desktop", "typescript"],
+  "keywords": [
+    "electron",
+    "playlist",
+    "desktop",
+    "typescript"
+  ],
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "@types/node": "^22.15.30",
     "@types/react": "^19.1.6",
     "@types/react-dom": "^19.1.6",
+    "@types/sql.js": "^1.4.11",
     "@vitejs/plugin-react": "^4.5.2",
     "electron": "^36.4.0",
     "electron-builder": "^26.0.12",
@@ -28,7 +34,8 @@
   "dependencies": {
     "lucide-react": "^0.468.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "sql.js": "^1.14.2"
   },
   "build": {
     "appId": "com.playlists.desktop",
@@ -36,12 +43,20 @@
     "directories": {
       "output": "release"
     },
-    "files": ["out/**/*", "package.json"],
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
     "mac": {
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
     "win": {
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ]
     },
     "nsis": {
       "oneClick": false,

@@ -1,0 +1,56 @@
+# Project guide for Claude
+
+This is a playlist app. It should allow users to create and modify playlists of music files from their local machine. The playlists should be persisted in a local database.
+
+## Project overview
+
+- **App:** Cross-platform desktop playlist manager
+- **Stack:** Electron, TypeScript, React, Vite (`electron-vite`), SQL light database that can run locally
+- **Targets:** macOS and Windows
+- **Architecture:** React renderer for UI; Electron main process for desktop logic; preload bridge for narrowly scoped IPC. This is a desktop app, not a browser-deployed website.
+
+## Commands
+
+- Install dependencies: `npm install`
+- Run the desktop app: `npm run dev`
+- Check TypeScript: `npm run typecheck`
+- Build: `npm run build`
+- Package an unpacked app: `npm run package`
+- Create platform installers: `npm run make`
+
+## Project structure
+
+- `src/main/` — Electron main-process code and native capabilities
+- `src/preload/` — typed, limited bridge between main and renderer
+- `src/renderer/` — React interface and presentation
+- `electron.vite.config.ts` — build configuration for the separate processes
+
+## Coding guidelines
+
+- **Language and style:** <!-- e.g. TypeScript strict mode; formatting/linting preferences -->
+- **Naming conventions:** <!-- Add preferred naming patterns -->
+- **UI conventions:** <!-- Add component, styling, and accessibility expectations -->
+- **State/data handling:** <!-- Describe preferred state management and persistence -->
+- **Testing:** <!-- Add test framework, test commands, and coverage expectations -->
+
+## Architecture and security rules
+
+- Keep UI/presentation in the renderer and desktop/native behavior in the main process.
+- Expose only explicit, minimal APIs from preload; add typed IPC methods rather than exposing Electron objects.
+- Preserve `contextIsolation: true`, `nodeIntegration: false`, and renderer sandboxing.
+- Validate IPC inputs in the main process before using them.
+- <!-- Add project-specific architectural constraints -->
+
+## Workflow for changes
+
+1. <!-- Add any required planning or review steps -->
+2. Run `npm run typecheck` and `npm run build` before considering code changes complete.
+3. <!-- Add other required checks, such as tests or manual UI review -->
+
+## Product decisions and domain terms
+
+<!-- Record decisions Claude should preserve: playlist behavior, terminology, persistence, platform differences, and UX constraints. -->
+
+## Do not
+
+- Modify any files outside of this project
