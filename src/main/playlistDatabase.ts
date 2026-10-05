@@ -47,7 +47,7 @@ export class PlaylistDatabase {
   create(input: CreatePlaylistInput): Playlist[] {
     this.run('INSERT INTO playlists (title, description) VALUES (?, ?)', [
       this.cleanTitle(input.title),
-      input.description?.trim() ?? '',
+      this.cleanDescription(input.description),
     ])
     this.persist()
     return this.list()
@@ -91,6 +91,10 @@ export class PlaylistDatabase {
     this.run('DELETE FROM playlist_tracks WHERE id = ? AND playlist_id = ?', [trackId, playlistId])
     this.persist()
     return this.list()
+  }
+
+  getTrackFilePath(trackId: number): string | undefined {
+    return this.query<{ filePath: string }>('SELECT file_path AS filePath FROM playlist_tracks WHERE id = ?', [trackId])[0]?.filePath
   }
 
   close(): void {
@@ -161,6 +165,12 @@ export class PlaylistDatabase {
     const title = value.trim()
     if (!title || title.length > 100) throw new Error('Playlist names must be 1–100 characters.')
     return title
+  }
+
+  private cleanDescription(value: string | undefined): string {
+    const description = value?.trim() ?? ''
+    if (description.length > 500) throw new Error('Playlist descriptions must be 500 characters or fewer.')
+    return description
   }
 
   private seedStarterPlaylists(): void {
