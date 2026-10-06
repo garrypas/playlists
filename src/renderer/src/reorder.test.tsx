@@ -1,6 +1,7 @@
 import { screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import {
+  announcements,
   type AppHarness,
   dragSong,
   expectPlaying,
@@ -80,7 +81,7 @@ describe('moving songs with the keyboard', () => {
     moveButton('Two').focus()
     await user.keyboard('{ArrowDown}{ArrowDown}')
     expect(savedOrder(desktop)).toEqual(['One', 'Three', 'Four', 'Two', 'Five'])
-    expect(screen.getByRole('status')).toHaveTextContent('Moved Two to position 4 of 5.')
+    expect(announcements()).toContain('Moved Two to position 4 of 5.')
     await user.keyboard('{ArrowUp}')
     expect(savedOrder(desktop)).toEqual(['One', 'Three', 'Two', 'Four', 'Five'])
   })

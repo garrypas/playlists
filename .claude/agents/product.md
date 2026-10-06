@@ -15,6 +15,7 @@ You own product decisions for **goodsongs**, a desktop app (Electron + React, ma
 
 ## Current behavior (shipped)
 - **Playlists:** create and rename through an in-app name dialog, because Electron doesn't support `window.prompt` (1–100 chars, errors shown inline, an unchanged name is a no-op). Delete asks for confirmation and also removes the playlist's songs. Descriptions are trimmed and capped at 500 chars.
+- **Playlist order:** drag a playlist up or down in the sidebar; a line shows where it will land, and the order is saved on drop (dropping where it started does nothing). Keyboard users focus a playlist and press Alt+↑/↓ (plain arrows do nothing); focus stays on it and screen readers hear its new position. The Home grid follows the same order, new playlists go at the end, and existing playlists start in creation order. Moving never changes the open playlist or playback. Off with fewer than two playlists; songs dragged onto the sidebar are ignored. If saving fails, an alert shows and the old order stays.
 - **Songs:** added only via the native file picker; removed per row. The search box filters by title/artist/album.
 - **Song details:** title, artist, album, album artist, track and disc number, and length come from each file's tags when it's added (falling back to the file name, "Unknown artist", no album and `—:—`). Songs saved before tags were read get them at the next launch; missing or unreadable files keep their file name and are retried each launch. Tags are read once, so later edits to a file's tags aren't picked up.
 - **Reordering:** drag a song row up or down; a line shows where it will land, and the new order is saved on drop (dropping it where it started does nothing). Keyboard users focus a song's grip handle ("Move <song>") and press ↑/↓ to move it one place; screen readers hear the new position. Reordering is off while a search filters the list, and in playlists with fewer than two songs. The playing song keeps playing and continues from its new place; the queue and a shuffled order are unchanged. If saving fails, an alert shows and the old order stays.
@@ -47,7 +48,7 @@ You own product decisions for **goodsongs**, a desktop app (Electron + React, ma
 - Explore and Your library have no "Add to queue" (the queue only holds songs from the list that's playing), and no way to remove a song from every playlist at once. Explore has no album filter.
 - Your library has no search, no sort options (e.g. recently added) and no albums section on artist pages; it's songs-in-playlists only (no folder scanning).
 - There's no cross-playlist queue, no reordering of the queue, no repeat mode, and no saving of playback state between launches.
-- Songs can't be dragged between playlists or reordered while the list is filtered.
+- Songs can't be dragged between playlists (e.g. onto a sidebar playlist) or reordered while the list is filtered. Playlists can't be reordered from the Home grid, only the sidebar.
 - There's no CI. Automated behavior tests (`npm test`) cover the shipped behavior above, but visual details (hover effects, layout) are unverified until the user runs `npm run dev`.
 
 ## Constraints that shape product scope

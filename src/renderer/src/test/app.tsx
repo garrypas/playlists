@@ -90,6 +90,34 @@ export async function dragSong(title: string, onto: { above: string } | { below:
   await act(async () => {})
 }
 
+/** The playlists in the sidebar, top to bottom. */
+export function sidebarPlaylists(): string[] {
+  return within(screen.getByRole('list', { name: 'Playlists' }))
+    .queryAllByRole('button')
+    .map((button) => {
+      // Read it as a screen reader would, without the decorative icon.
+      const copy = button.cloneNode(true) as HTMLElement
+      copy.querySelectorAll('[aria-hidden="true"]').forEach((hidden) => hidden.remove())
+      return copy.textContent ?? ''
+    })
+}
+
+export function sidebarPlaylist(title: string): HTMLElement {
+  return within(screen.getByRole('list', { name: 'Playlists' })).getByRole('button', { name: title })
+}
+
+/** Drags a playlist in the sidebar onto the top or bottom half of another, then waits for the move to save. */
+export async function dragPlaylist(title: string, onto: { above: string } | { below: string }): Promise<void> {
+  const target = sidebarPlaylist('above' in onto ? onto.above : onto.below)
+  target.getBoundingClientRect = () => DOMRect.fromRect({ x: 0, y: 0, width: 200, height: 40 })
+  const clientY = 'above' in onto ? 5 : 35
+  fireEvent.dragStart(sidebarPlaylist(title))
+  fireEvent.dragOver(target, { clientY })
+  fireEvent.drop(target, { clientY })
+  fireEvent.dragEnd(sidebarPlaylist(title))
+  await act(async () => {})
+}
+
 /** The song's artwork, which doubles as a mouse-only play/pause button (hidden from screen readers). */
 export function artworkButton(title: string): HTMLElement {
   return screen
@@ -146,6 +174,14 @@ export function songRow(title: string): HTMLElement {
 export async function openAddToPlaylistMenu(user: AppHarness['user'], title: string): Promise<HTMLElement> {
   await user.click(screen.getByRole('button', { name: `Add ${title} to a playlist` }))
   return screen.getByRole('group', { name: `Add ${title} to` })
+}
+
+/** What screen readers have been told, from every live status region on screen. */
+export function announcements(): string[] {
+  return screen
+    .queryAllByRole('status')
+    .map((region) => region.textContent ?? '')
+    .filter(Boolean)
 }
 
 export function queuePanel(): HTMLElement | null {

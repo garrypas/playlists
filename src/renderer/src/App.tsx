@@ -45,6 +45,14 @@ function librarySourceTracks(source: Exclude<PlaySource, 'playlist'>, songs: Lib
 
 const sourceLabels: Record<string, string> = { playlist: 'PLAYLIST', explore: 'EXPLORE', album: 'ALBUM', artist: 'ARTIST' }
 
+// The drop-line class for the item at `index` while something is dragged to gap `slot` (0 = before the first item)
+// from `from`. No line shows where dropping wouldn't move anything.
+function dropLine(slot: number | null, from: number, index: number, count: number): string {
+  if (slot === null || from < 0 || slot === from || slot === from + 1) return ''
+  if (slot === index) return 'drop-before'
+  return slot === index + 1 && index === count - 1 ? 'drop-after' : ''
+}
+
 // Returns track ids in random order, with `firstId` (if given) kept at the front.
 function shuffledIds(tracks: PlaylistTrack[], firstId?: number): number[] {
   const ids = tracks.map((track) => track.id).filter((id) => id !== firstId)
@@ -80,8 +88,11 @@ function App() {
   // The song being dragged to a new place, and the gap (0 = before the first song) it would drop into.
   const [draggedTrackId, setDraggedTrackId] = useState<number | null>(null)
   const [dropSlot, setDropSlot] = useState<number | null>(null)
-  // Announces reorders to screen readers.
+  // Announces song and playlist moves to screen readers.
   const [moveStatus, setMoveStatus] = useState('')
+  // The same, for dragging playlists in the sidebar.
+  const [draggedPlaylistId, setDraggedPlaylistId] = useState<number | null>(null)
+  const [playlistDropSlot, setPlaylistDropSlot] = useState<number | null>(null)
   const queueButtonRef = useRef<HTMLButtonElement>(null)
   const [view, setView] = useState<'home' | 'explore' | 'library'>('home')
   const [source, setSource] = useState<PlaySource>('playlist')
@@ -434,7 +445,8 @@ function App() {
     }
   }
 
-  // The gap a song would drop into when dragged over the row at `index`: above it in its top half, else below it.
+  // The gap a song or playlist would drop into when dragged over the item at `index`: above it in its top half, else
+  // below it.
   function dropSlotAt(event: React.DragEvent, index: number): number {
     const { top, height } = event.currentTarget.getBoundingClientRect()
     return event.clientY < top + height / 2 ? index : index + 1
@@ -459,13 +471,44 @@ function App() {
     if (to >= 0 && to < trackCount) void moveTrack(trackId, to)
   }
 
-  // Shows the drop line only where dropping would actually move the song.
   function dropLineClass(index: number): string {
-    if (dropSlot === null || draggedTrackId === null) return ''
+    if (draggedTrackId === null) return ''
     const from = selectedPlaylist?.tracks.findIndex((track) => track.id === draggedTrackId) ?? -1
-    if (dropSlot === from || dropSlot === from + 1) return ''
-    if (dropSlot === index) return 'drop-before'
-    return dropSlot === index + 1 && index === trackCount - 1 ? 'drop-after' : ''
+    return dropLine(dropSlot, from, index, trackCount)
+  }
+
+  // Moves a playlist to `toIndex` in the sidebar and saves the new order. Nothing else changes.
+  async function movePlaylist(playlistId: number, toIndex: number): Promise<void> {
+    const playlist = playlists.find((item) => item.id === playlistId)
+    if (!playlist || playlists.indexOf(playlist) === toIndex) return
+    try {
+      const updated = await window.desktop.playlists.move(playlistId, toIndex)
+      applyPlaylists(updated)
+      const position = updated.findIndex((item) => item.id === playlistId) + 1
+      setMoveStatus(`Moved ${playlist.title} to position ${position} of ${updated.length}.`)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Could not move playlist.')
+    }
+  }
+
+  function dropDraggedPlaylist(slot: number): void {
+    const from = playlists.findIndex((playlist) => playlist.id === draggedPlaylistId)
+    if (draggedPlaylistId !== null && from >= 0) void movePlaylist(draggedPlaylistId, slot > from ? slot - 1 : slot)
+    endPlaylistDrag()
+  }
+
+  function endPlaylistDrag(): void {
+    setDraggedPlaylistId(null)
+    setPlaylistDropSlot(null)
+  }
+
+  // Alt+↑/↓ moves the focused playlist one place, since plain arrow keys shouldn't rearrange navigation.
+  function handlePlaylistMoveKey(event: React.KeyboardEvent, playlistId: number, index: number): void {
+    const step = ({ ArrowUp: -1, ArrowDown: 1 } as Record<string, number | undefined>)[event.key]
+    if (step === undefined || !event.altKey) return
+    event.preventDefault()
+    const to = index + step
+    if (to >= 0 && to < playlists.length) void movePlaylist(playlistId, to)
   }
 
   function selectPlaylist(playlist: Playlist): void {
@@ -575,16 +618,44 @@ function App() {
               <Plus size={17} />
             </button>
           </div>
-          {playlists.map((playlist) => (
-            <button
-              key={playlist.id}
-              onClick={() => selectPlaylist(playlist)}
-              className={`playlist-nav ${view === 'home' && selectedPlaylist?.id === playlist.id ? 'chosen' : ''}`}
-            >
-              <span className={`mini-cover ${playlist.gradient}`}>{playlist.icon}</span>
-              <span>{playlist.title}</span>
-            </button>
-          ))}
+          <ul className="playlist-nav-list" aria-label="Playlists">
+            {playlists.map((playlist, index) => (
+              <li key={playlist.id}>
+                <button
+                  onClick={() => selectPlaylist(playlist)}
+                  className={`playlist-nav ${view === 'home' && selectedPlaylist?.id === playlist.id ? 'chosen' : ''} ${draggedPlaylistId === playlist.id ? 'playlist-dragging' : ''} ${draggedPlaylistId === null ? '' : dropLine(playlistDropSlot, playlists.findIndex((item) => item.id === draggedPlaylistId), index, playlists.length)}`}
+                  title={playlists.length > 1 ? 'Drag, or press Alt+↑/↓, to reorder' : undefined}
+                  aria-keyshortcuts={playlists.length > 1 ? 'Alt+ArrowUp Alt+ArrowDown' : undefined}
+                  draggable={playlists.length > 1}
+                  onKeyDown={(event) => handlePlaylistMoveKey(event, playlist.id, index)}
+                  onDragStart={(event) => {
+                    setDraggedPlaylistId(playlist.id)
+                    if (event.dataTransfer) {
+                      event.dataTransfer.effectAllowed = 'move'
+                      event.dataTransfer.setData('text/plain', playlist.title)
+                    }
+                  }}
+                  onDragOver={(event) => {
+                    if (draggedPlaylistId === null) return
+                    event.preventDefault()
+                    setPlaylistDropSlot(dropSlotAt(event, index))
+                  }}
+                  onDrop={(event) => {
+                    if (draggedPlaylistId === null) return
+                    event.preventDefault()
+                    dropDraggedPlaylist(dropSlotAt(event, index))
+                  }}
+                  onDragEnd={endPlaylistDrag}
+                >
+                  <span className={`mini-cover ${playlist.gradient}`} aria-hidden="true">
+                    {playlist.icon}
+                  </span>
+                  <span>{playlist.title}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+
           {!loading && playlists.length === 0 && <p className="sidebar-empty">Create a playlist to get started.</p>}
         </div>
       </aside>
@@ -830,9 +901,6 @@ function App() {
                     </span>
                   </div>
                 ))}
-                <p className="visually-hidden" role="status">
-                  {moveStatus}
-                </p>
                 {visibleTracks.length === 0 && (
                   <p className="empty-state">
                     {query
@@ -985,6 +1053,9 @@ function App() {
           onError={handlePlaybackError}
         />
       </footer>
+      <p className="visually-hidden" role="status">
+        {moveStatus}
+      </p>
       {queueOpen && (
         <section ref={queuePanelRef} id="queue-panel" className="queue-panel" aria-label="Queue">
           <div className="queue-header">

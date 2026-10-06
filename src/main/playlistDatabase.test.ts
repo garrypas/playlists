@@ -332,5 +332,38 @@ describe('song details from tags', () => {
     expect(db.list()[0]).toMatchObject({ title: 'Old favourites' })
     expect(db.list()[0].tracks[0]).toMatchObject({ title: 'old', albumArtist: '', trackNumber: null, discNumber: null })
     expect(db.filesNeedingTags()).toEqual(['/music/old.mp3'])
+    // Playlists keep their creation order, and new ones go after them.
+    db.create({ title: 'Newer' })
+    expect(titles()).toEqual(['Old favourites', 'Newer'])
+  })
+})
+
+describe('ordering playlists', () => {
+  it('moves a playlist down, up, and to either end, and keeps the order after a restart', async () => {
+    const id = (title: string): number => db.list().find((playlist) => playlist.title === title)!.id
+    db.movePlaylist(id('Late night drive'), 2)
+    expect(titles()).toEqual(['Soft focus', 'Sunday, slowly', 'Late night drive', 'On repeat'])
+    db.movePlaylist(id('On repeat'), 0)
+    expect(titles()).toEqual(['On repeat', 'Soft focus', 'Sunday, slowly', 'Late night drive'])
+    db.movePlaylist(id('Soft focus'), 99)
+    expect(titles()).toEqual(['On repeat', 'Sunday, slowly', 'Late night drive', 'Soft focus'])
+    await reopen()
+    expect(titles()).toEqual(['On repeat', 'Sunday, slowly', 'Late night drive', 'Soft focus'])
+  })
+
+  it('adds new playlists at the end of the current order', () => {
+    db.movePlaylist(db.list()[3].id, 0)
+    expect(db.create({ title: 'Road trip' }).at(-1)?.title).toBe('Road trip')
+  })
+
+  it('keeps the order when a playlist is deleted', () => {
+    db.movePlaylist(db.list()[3].id, 0)
+    db.remove(db.list()[1].id)
+    expect(titles()).toEqual(['On repeat', 'Soft focus', 'Sunday, slowly'])
+  })
+
+  it('reports a playlist that no longer exists, or a bad position', () => {
+    expect(() => db.movePlaylist(9999, 0)).toThrow('Playlist not found.')
+    expect(() => db.movePlaylist(db.list()[0].id, -1)).toThrow('Invalid playlist position.')
   })
 })

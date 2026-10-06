@@ -624,3 +624,22 @@ ul.library-grid {
 .library-grid .library-card {
   width: 100%;
 }
+
+/* Playlists in the sidebar can be dragged into a new order. */
+.playlist-nav-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.playlist-nav.playlist-dragging {
+  opacity: 0.4;
+}
+
+.playlist-nav.drop-before {
+  box-shadow: inset 0 2px 0 #d0ed9a;
+}
+
+.playlist-nav.drop-after {
+  box-shadow: inset 0 -2px 0 #d0ed9a;
+}

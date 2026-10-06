@@ -21,6 +21,7 @@ const desktopApi = {
       ipcRenderer.invoke('playlists:remove-track', playlistId, trackId),
     moveTrack: (playlistId: number, trackId: number, toIndex: number): Promise<Playlist[]> =>
       ipcRenderer.invoke('playlists:move-track', playlistId, trackId, toIndex),
+    move: (id: number, toIndex: number): Promise<Playlist[]> => ipcRenderer.invoke('playlists:move', id, toIndex),
   } satisfies PlaylistApi,
 }
 

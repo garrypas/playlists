@@ -35,7 +35,7 @@ export class PlaylistDatabase {
 
   list(): Playlist[] {
     const playlists = this.query<Omit<Playlist, 'tracks'>>(
-      'SELECT id, title, description, gradient, icon FROM playlists ORDER BY id',
+      'SELECT id, title, description, gradient, icon FROM playlists ORDER BY position, id',
     )
     return playlists.map((playlist) => ({
       ...playlist,
@@ -51,7 +51,7 @@ export class PlaylistDatabase {
   }
 
   create(input: CreatePlaylistInput): Playlist[] {
-    this.run('INSERT INTO playlists (title, description) VALUES (?, ?)', [
+    this.run(`INSERT INTO playlists (title, description, position) VALUES (?, ?, ${nextPlaylistPosition})`, [
       this.cleanTitle(input.title),
       this.cleanDescription(input.description),
     ])
@@ -147,6 +147,25 @@ export class PlaylistDatabase {
     this.persist()
   }
 
+  // Moves a playlist to `toIndex` in the list (clamped to the end) and renumbers every playlist's position.
+  movePlaylist(id: number, toIndex: number): Playlist[] {
+    const playlistId = this.requirePlaylist(id)
+    if (!Number.isSafeInteger(toIndex) || toIndex < 0) throw new Error('Invalid playlist position.')
+    const ids = this.query<{ id: number }>('SELECT id FROM playlists ORDER BY position, id').map((row) => row.id)
+    ids.splice(ids.indexOf(playlistId), 1)
+    ids.splice(Math.min(toIndex, ids.length), 0, playlistId)
+    this.db.run('BEGIN')
+    try {
+      ids.forEach((item, position) => this.run('UPDATE playlists SET position = ? WHERE id = ?', [position, item]))
+      this.db.run('COMMIT')
+    } catch (error) {
+      this.db.run('ROLLBACK')
+      throw error
+    }
+    this.persist()
+    return this.list()
+  }
+
   removeTrack(playlistId: number, trackId: number): Playlist[] {
     this.requirePlaylist(playlistId)
     if (!Number.isSafeInteger(trackId) || trackId < 1) throw new Error('Invalid track ID.')
@@ -232,6 +251,12 @@ export class PlaylistDatabase {
     for (const [name, definition] of Object.entries(added)) {
       if (!columns.has(name)) this.run(`ALTER TABLE playlist_tracks ADD COLUMN ${name} ${definition}`)
     }
+    // Playlists were listed in creation order before they could be reordered, so that's their starting order.
+    const playlistColumns = this.query<{ name: string }>('PRAGMA table_info(playlists)').map((row) => row.name)
+    if (!playlistColumns.includes('position')) {
+      this.run('ALTER TABLE playlists ADD COLUMN position INTEGER NOT NULL DEFAULT 0')
+      this.run('UPDATE playlists SET position = id')
+    }
   }
 
   private query<T>(sql: string, parameters: SqlValue[] = []): T[] {
@@ -291,7 +316,7 @@ export class PlaylistDatabase {
     this.db.run('BEGIN')
     try {
       for (const playlist of starterPlaylists) {
-        this.run('INSERT INTO playlists (title, description, gradient, icon) VALUES (?, ?, ?, ?)', [
+        this.run(`INSERT INTO playlists (title, description, gradient, icon, position) VALUES (?, ?, ?, ?, ${nextPlaylistPosition})`, [
           playlist.title,
           playlist.description,
           playlist.gradient,
@@ -306,6 +331,8 @@ export class PlaylistDatabase {
     }
   }
 }
+
+const nextPlaylistPosition = '(SELECT COALESCE(MAX(position), -1) + 1 FROM playlists)'
 
 // Title, artist, album, album artist, track, disc and duration, in that order, falling back to the file name.
 function songDetails(filePath: string, tags: TrackTags = {}): SqlValue[] {

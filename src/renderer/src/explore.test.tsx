@@ -1,6 +1,7 @@
 import { screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import {
+  announcements,
   expectPlaying,
   goHome,
   openAddToPlaylistMenu,
@@ -214,7 +215,7 @@ describe('adding a song to another playlist', () => {
     const menu = await openAddToPlaylistMenu(user, 'Holocene')
     expect(within(menu).getByRole('button', { name: 'Mix (already added)' })).toBeDisabled()
     await user.click(within(menu).getByRole('button', { name: 'Other' }))
-    expect(screen.getByRole('status')).toHaveTextContent('Added Holocene to Other.')
+    expect(announcements()).toContain('Added Holocene to Other.')
     expect(within(songRow('Holocene')).getByText('Mix, Other')).toBeInTheDocument()
     expect(desktop.saved()[1].tracks.map((track) => track.title)).toEqual(['Nightcall', 'Wait', 'Holocene'])
     await openPlaylist(user, 'Other')
@@ -224,8 +225,8 @@ describe('adding a song to another playlist', () => {
   it('closes the menu with Escape and returns focus to its button', async () => {
     const { user } = await renderApp(library)
     await openExplore(user)
-    await openAddToPlaylistMenu(user, 'Holocene')
-    expect(screen.getByRole('button', { name: 'Other' })).toHaveFocus()
+    const menu = await openAddToPlaylistMenu(user, 'Holocene')
+    expect(within(menu).getByRole('button', { name: 'Other' })).toHaveFocus()
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('group', { name: 'Add Holocene to' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add Holocene to a playlist' })).toHaveFocus()
@@ -246,7 +247,7 @@ describe('adding a song to another playlist', () => {
     const menu = await openAddToPlaylistMenu(user, 'Holocene')
     await user.click(within(menu).getByRole('button', { name: 'Other' }))
     expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('Disk is full.'))
-    expect(screen.getByRole('status')).toHaveTextContent('')
+    expect(announcements()).toEqual([])
     expect(desktop.saved()[1].tracks).toHaveLength(2)
   })
 })

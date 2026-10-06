@@ -207,6 +207,21 @@ describe('playlist requests from the window', () => {
     expect(tracks.at(-1)?.title).toBe('Move A')
   })
 
+  it('moves a playlist to a new place in the list', async () => {
+    const [first] = await invoke('playlists:list')
+    const updated = await invoke('playlists:move', first.id, 1)
+    expect(updated[1].id).toBe(first.id)
+    await invoke('playlists:move', first.id, 0)
+  })
+
+  it.each(['1', 1.5, -1, null, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects the playlist position %j when moving a playlist',
+    async (position) => {
+      const playlist = (await invoke('playlists:list'))[0]
+      await expect(invoke('playlists:move', playlist.id, position)).rejects.toThrow('Invalid playlist position.')
+    },
+  )
+
   it.each(['1', 1.5, -1, null, Number.MAX_SAFE_INTEGER + 1])(
     'rejects the song position %j when moving a song',
     async (position) => {

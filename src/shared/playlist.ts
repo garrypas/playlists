@@ -35,4 +35,6 @@ export interface PlaylistApi {
   addTrack(playlistId: number, trackId: number): Promise<Playlist[]>
   removeTrack(playlistId: number, trackId: number): Promise<Playlist[]>
   moveTrack(playlistId: number, trackId: number, toIndex: number): Promise<Playlist[]>
+  /** Moves a playlist to `toIndex` in the list of playlists. */
+  move(id: number, toIndex: number): Promise<Playlist[]>
 }

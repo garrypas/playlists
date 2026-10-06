@@ -135,6 +135,11 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
           const playlist = find(playlistId)
           playlist.tracks = playlist.tracks.filter((item) => item.id !== trackId)
         }),
+      move: (id, toIndex) =>
+        call('playlists:move', () => {
+          const [moved] = store.splice(store.indexOf(find(id)), 1)
+          store.splice(Math.min(toIndex, store.length), 0, moved)
+        }),
       moveTrack: (playlistId, trackId, toIndex) =>
         call('playlists:move-track', () => {
           const playlist = find(playlistId)
