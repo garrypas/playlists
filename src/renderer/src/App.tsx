@@ -66,18 +66,26 @@ function App() {
   const queueButtonRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
-    void window.desktop.playlists.list().then((items) => {
-      setPlaylists(items)
-      setSelectedPlaylistId(items[0]?.id ?? null)
-    }).catch((error: unknown) => {
-      window.alert(error instanceof Error ? error.message : 'Could not load playlists.')
-    }).finally(() => setLoading(false))
+    void window.desktop.playlists
+      .list()
+      .then((items) => {
+        setPlaylists(items)
+        setSelectedPlaylistId(items[0]?.id ?? null)
+      })
+      .catch((error: unknown) => {
+        window.alert(error instanceof Error ? error.message : 'Could not load playlists.')
+      })
+      .finally(() => setLoading(false))
   }, [])
 
   const selectedPlaylist = playlists.find((playlist) => playlist.id === selectedPlaylistId)
-  const visibleTracks = useMemo(() => (selectedPlaylist?.tracks ?? []).filter((track) =>
-    `${track.title} ${track.artist} ${track.album}`.toLowerCase().includes(query.toLowerCase()),
-  ), [query, selectedPlaylist])
+  const visibleTracks = useMemo(
+    () =>
+      (selectedPlaylist?.tracks ?? []).filter((track) =>
+        `${track.title} ${track.artist} ${track.album}`.toLowerCase().includes(query.toLowerCase()),
+      ),
+    [query, selectedPlaylist],
+  )
   const currentTrack = selectedPlaylist?.tracks[activeTrack]
   const trackCount = selectedPlaylist?.tracks.length ?? 0
   // A drop position in a filtered list would be ambiguous, so reordering waits until the search is cleared.
@@ -252,7 +260,9 @@ function App() {
   function handlePlaybackError(): void {
     if (!currentTrack) return
     setPlaying(false)
-    window.alert(`Couldn't play “${currentTrack.title}”. The file may have been moved, deleted, or be in an unsupported format.`)
+    window.alert(
+      `Couldn't play “${currentTrack.title}”. The file may have been moved, deleted, or be in an unsupported format.`,
+    )
   }
 
   async function createPlaylist(title: string): Promise<void> {
@@ -395,135 +405,539 @@ function App() {
   function queueItem(index: number, kind: 'current' | 'queued' | 'playlist', position = 0): React.ReactNode {
     const track = selectedPlaylist?.tracks[index]
     if (!track) return null
-    const meta = <><TrackArt trackId={track.id} color={coverColors[index % coverColors.length]} iconSize={17} /><span className="track-meta"><strong>{track.title}</strong><span>{track.artist}</span></span><span className="track-duration">{formatDuration(track.durationSeconds)}</span></>
-    if (kind === 'current') return <div key="current" className="queue-item queue-current">{meta}</div>
-    if (kind === 'playlist') return <button key={track.id} className="queue-item" title={`Play ${track.title}`} onClick={() => playTrackNow(index)}>{meta}</button>
-    return <div key={`queued-${position}`} className="queue-row">
-      <button className="queue-item" title={`Play ${track.title}`} onClick={() => playFromQueue(position)}>{meta}</button>
-      <button className="icon-button control-muted" aria-label={`Remove ${track.title} from queue`} title="Remove from queue" onClick={() => setQueue(queue.filter((_, i) => i !== position))}><X size={14} /></button>
-    </div>
+    const meta = (
+      <>
+        <TrackArt trackId={track.id} color={coverColors[index % coverColors.length]} iconSize={17} />
+        <span className="track-meta">
+          <strong>{track.title}</strong>
+          <span>{track.artist}</span>
+        </span>
+        <span className="track-duration">{formatDuration(track.durationSeconds)}</span>
+      </>
+    )
+    if (kind === 'current')
+      return (
+        <div key="current" className="queue-item queue-current">
+          {meta}
+        </div>
+      )
+    if (kind === 'playlist')
+      return (
+        <button key={track.id} className="queue-item" title={`Play ${track.title}`} onClick={() => playTrackNow(index)}>
+          {meta}
+        </button>
+      )
+    return (
+      <div key={`queued-${position}`} className="queue-row">
+        <button className="queue-item" title={`Play ${track.title}`} onClick={() => playFromQueue(position)}>
+          {meta}
+        </button>
+        <button
+          className="icon-button control-muted"
+          aria-label={`Remove ${track.title} from queue`}
+          title="Remove from queue"
+          onClick={() => setQueue(queue.filter((_, i) => i !== position))}
+        >
+          <X size={14} />
+        </button>
+      </div>
+    )
   }
 
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <div className="brand"><span className="brand-mark"><AudioLines size={19} /></span><span>good<span className="brand-light">songs</span></span></div>
+        <div className="brand">
+          <span className="brand-mark">
+            <AudioLines size={19} />
+          </span>
+          <span>
+            good<span className="brand-light">songs</span>
+          </span>
+        </div>
         <div className="sidebar-section">
           <p className="eyebrow">YOUR SPACE</p>
-          <button className="nav-item active"><Home size={17} /> Home</button>
-          <button className="nav-item"><Search size={17} /> Explore</button>
-          <button className="nav-item"><Library size={17} /> Your library</button>
+          <button className="nav-item active">
+            <Home size={17} /> Home
+          </button>
+          <button className="nav-item">
+            <Search size={17} /> Explore
+          </button>
+          <button className="nav-item">
+            <Library size={17} /> Your library
+          </button>
         </div>
         <div className="sidebar-section collection-section">
-          <div className="section-heading"><p className="eyebrow">PLAYLISTS</p><button className="icon-button subtle" aria-label="Create playlist" title="Create a new playlist" onClick={() => setNameDialog('create')}><Plus size={17} /></button></div>
+          <div className="section-heading">
+            <p className="eyebrow">PLAYLISTS</p>
+            <button
+              className="icon-button subtle"
+              aria-label="Create playlist"
+              title="Create a new playlist"
+              onClick={() => setNameDialog('create')}
+            >
+              <Plus size={17} />
+            </button>
+          </div>
           {playlists.map((playlist) => (
-            <button key={playlist.id} onClick={() => selectPlaylist(playlist)} className={`playlist-nav ${selectedPlaylist?.id === playlist.id ? 'chosen' : ''}`}>
-              <span className={`mini-cover ${playlist.gradient}`}>{playlist.icon}</span><span>{playlist.title}</span>
+            <button
+              key={playlist.id}
+              onClick={() => selectPlaylist(playlist)}
+              className={`playlist-nav ${selectedPlaylist?.id === playlist.id ? 'chosen' : ''}`}
+            >
+              <span className={`mini-cover ${playlist.gradient}`}>{playlist.icon}</span>
+              <span>{playlist.title}</span>
             </button>
           ))}
           {!loading && playlists.length === 0 && <p className="sidebar-empty">Create a playlist to get started.</p>}
         </div>
-        <div className="sidebar-bottom"><div className="profile-avatar">J</div><div><strong>Jamie Parker</strong><span>Free account</span></div><MoreHorizontal size={18} className="profile-more" /></div>
+        <div className="sidebar-bottom">
+          <div className="profile-avatar">J</div>
+          <div>
+            <strong>Jamie Parker</strong>
+            <span>Free account</span>
+          </div>
+          <MoreHorizontal size={18} className="profile-more" />
+        </div>
       </aside>
 
       <section className="main-panel">
-        <header className="topbar"><div className="breadcrumbs"><span>Home</span><span className="crumb-divider">/</span><strong>{selectedPlaylist?.title ?? 'Your playlists'}</strong></div><div className="topbar-actions"><button className="icon-button" aria-label="Settings" title="Settings"><SlidersHorizontal size={17} /></button><div className="avatar-small">J</div></div></header>
+        <header className="topbar">
+          <div className="breadcrumbs">
+            <span>Home</span>
+            <span className="crumb-divider">/</span>
+            <strong>{selectedPlaylist?.title ?? 'Your playlists'}</strong>
+          </div>
+          <div className="topbar-actions">
+            <button className="icon-button" aria-label="Settings" title="Settings">
+              <SlidersHorizontal size={17} />
+            </button>
+            <div className="avatar-small">J</div>
+          </div>
+        </header>
         <div className="content-scroll">
-          <section className="welcome-row"><div><p className="eyebrow welcome-label">YOUR MUSIC, YOUR WAY</p><h1>A little music<br />for the moment.</h1><p className="welcome-copy">Your playlists stay saved on this device.</p></div><div className="welcome-art" aria-hidden="true"><span className="sun-disc" /><span className="art-hill hill-back" /><span className="art-hill hill-front" /><span className="art-grain" /></div></section>
+          <section className="welcome-row">
+            <div>
+              <p className="eyebrow welcome-label">YOUR MUSIC, YOUR WAY</p>
+              <h1>
+                A little music
+                <br />
+                for the moment.
+              </h1>
+              <p className="welcome-copy">Your playlists stay saved on this device.</p>
+            </div>
+            <div className="welcome-art" aria-hidden="true">
+              <span className="sun-disc" />
+              <span className="art-hill hill-back" />
+              <span className="art-hill hill-front" />
+              <span className="art-grain" />
+            </div>
+          </section>
 
           <section className="playlist-section">
-            <div className="section-title-row"><div><p className="eyebrow">A GOOD PLACE TO START</p><h2>Your playlists</h2></div><button className="text-button" title="Create a new playlist" onClick={() => setNameDialog('create')}><Plus size={13} /> New playlist</button></div>
+            <div className="section-title-row">
+              <div>
+                <p className="eyebrow">A GOOD PLACE TO START</p>
+                <h2>Your playlists</h2>
+              </div>
+              <button className="text-button" title="Create a new playlist" onClick={() => setNameDialog('create')}>
+                <Plus size={13} /> New playlist
+              </button>
+            </div>
             <div className="playlist-grid">
-              {playlists.map((playlist, index) => <button key={playlist.id} className={`playlist-card ${selectedPlaylist?.id === playlist.id ? 'selected-card' : ''}`} onClick={() => selectPlaylist(playlist)}>
-                <span className={`playlist-art ${playlist.gradient}`}><span className="art-symbol">{playlist.icon}</span><span className="art-number">{String(index + 1).padStart(2, '0')}</span></span>
-                <span className="card-copy"><strong>{playlist.title}</strong><span>{playlist.tracks.length} {playlist.tracks.length === 1 ? 'song' : 'songs'} · {playlist.description}</span></span>
-              </button>)}
-              {!loading && playlists.length === 0 && <p className="empty-state">Create a playlist to start collecting your music.</p>}
+              {playlists.map((playlist, index) => (
+                <button
+                  key={playlist.id}
+                  className={`playlist-card ${selectedPlaylist?.id === playlist.id ? 'selected-card' : ''}`}
+                  onClick={() => selectPlaylist(playlist)}
+                >
+                  <span className={`playlist-art ${playlist.gradient}`}>
+                    <span className="art-symbol">{playlist.icon}</span>
+                    <span className="art-number">{String(index + 1).padStart(2, '0')}</span>
+                  </span>
+                  <span className="card-copy">
+                    <strong>{playlist.title}</strong>
+                    <span>
+                      {playlist.tracks.length} {playlist.tracks.length === 1 ? 'song' : 'songs'} ·{' '}
+                      {playlist.description}
+                    </span>
+                  </span>
+                </button>
+              ))}
+              {!loading && playlists.length === 0 && (
+                <p className="empty-state">Create a playlist to start collecting your music.</p>
+              )}
             </div>
           </section>
 
           <section className="tracks-section">
-            <div className="section-title-row track-heading"><div><p className="eyebrow">SAVED ON THIS DEVICE</p><h2>{selectedPlaylist ? selectedPlaylist.title : 'Choose a playlist'}</h2></div><div className="playlist-actions">
-              <label className="search-field"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a song" aria-label="Find a song" /></label>
-              <button className="small-action" title="Add audio files from this computer to the playlist" onClick={() => void addAudioFiles()} disabled={!selectedPlaylist}><Plus size={13} /> Add songs</button>
-              <button className="small-action icon-action" title="Rename this playlist" onClick={() => setNameDialog('rename')} disabled={!selectedPlaylist}>Rename</button>
-              <button className="small-action icon-action danger-action" title="Delete this playlist" onClick={() => void deletePlaylist()} disabled={!selectedPlaylist}>Delete</button>
-            </div></div>
-            <div className="track-tabs">{['Made for you', 'Your rotation', 'New finds'].map((name) => <button key={name} onClick={() => setTab(name)} className={tab === name ? 'tab-active' : ''}>{name}</button>)}</div>
-            <div className="track-table"><div className="track-row table-head"><span>#</span><span>TITLE</span><span>LOCATION</span><span>TIME</span><span /></div>
-              {visibleTracks.map((track, index) => <div
-                className={`track-row ${currentTrack?.id === track.id ? 'track-current' : ''} ${draggedTrackId === track.id ? 'track-dragging' : ''} ${dropLineClass(index)}`}
-                key={track.id}
-                draggable={canReorder}
-                onDragStart={(event) => {
-                  if (!canReorder) return
-                  setDraggedTrackId(track.id)
-                  if (event.dataTransfer) {
-                    event.dataTransfer.effectAllowed = 'move'
-                    event.dataTransfer.setData('text/plain', track.title)
-                  }
-                }}
-                onDragOver={(event) => {
-                  if (draggedTrackId === null) return
-                  event.preventDefault()
-                  setDropSlot(dropSlotAt(event, index))
-                }}
-                onDrop={(event) => {
-                  if (draggedTrackId === null) return
-                  event.preventDefault()
-                  dropDraggedTrack(dropSlotAt(event, index))
-                }}
-                onDragEnd={endDrag}
-              >
-                <button className="track-index track-play" aria-label={`Play ${track.title}`} title={`Play ${track.title}`} onClick={() => playFromList(track, index)}>{currentTrack?.id === track.id && playing ? <AudioLines size={15} /> : String(index + 1).padStart(2, '0')}</button>
-                <span className="track-title-cell"><button className="track-art-button" tabIndex={-1} aria-hidden="true" title={currentTrack?.id === track.id && playing ? 'Pause' : `Play ${track.title}`} onClick={() => currentTrack?.id === track.id ? setPlaying(!playing) : playFromList(track, index)}><TrackArt trackId={track.id} color={coverColors[index % coverColors.length]} iconSize={19} /><span className="track-art-overlay">{currentTrack?.id === track.id && playing ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}</span></button><span className="track-meta"><strong>{track.title}</strong><span>{track.artist}</span></span></span>
-                <span className="album-name">{track.album || 'Local audio file'}</span><span className="track-duration">{formatDuration(track.durationSeconds)}</span><span className="track-actions"><button className="track-move" aria-label={`Move ${track.title}`} title={query ? 'Clear the search to reorder songs' : 'Drag to reorder, or use the ↑ and ↓ keys'} disabled={!canReorder} onKeyDown={(event) => handleMoveKey(event, track.id, index)}><GripVertical size={15} /></button><button className="track-queue" aria-label={`Add ${track.title} to queue`} title="Add to queue" onClick={() => addToQueue(track.id)}><ListPlus size={15} /></button><button className="track-remove" aria-label={`Remove ${track.title} from playlist`} title="Remove from playlist" onClick={() => void removeTrack(track.id)}><X size={15} /></button></span>
-              </div>)}
-              <p className="visually-hidden" role="status">{moveStatus}</p>
-              {visibleTracks.length === 0 && <p className="empty-state">{query ? `No songs match “${query}”.` : selectedPlaylist ? 'This playlist is empty. Add songs from your music library to get started.' : 'Create a playlist to get started.'}</p>}
+            <div className="section-title-row track-heading">
+              <div>
+                <p className="eyebrow">SAVED ON THIS DEVICE</p>
+                <h2>{selectedPlaylist ? selectedPlaylist.title : 'Choose a playlist'}</h2>
+              </div>
+              <div className="playlist-actions">
+                <label className="search-field">
+                  <Search size={15} />
+                  <input
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Find a song"
+                    aria-label="Find a song"
+                  />
+                </label>
+                <button
+                  className="small-action"
+                  title="Add audio files from this computer to the playlist"
+                  onClick={() => void addAudioFiles()}
+                  disabled={!selectedPlaylist}
+                >
+                  <Plus size={13} /> Add songs
+                </button>
+                <button
+                  className="small-action icon-action"
+                  title="Rename this playlist"
+                  onClick={() => setNameDialog('rename')}
+                  disabled={!selectedPlaylist}
+                >
+                  Rename
+                </button>
+                <button
+                  className="small-action icon-action danger-action"
+                  title="Delete this playlist"
+                  onClick={() => void deletePlaylist()}
+                  disabled={!selectedPlaylist}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+            <div className="track-tabs">
+              {['Made for you', 'Your rotation', 'New finds'].map((name) => (
+                <button key={name} onClick={() => setTab(name)} className={tab === name ? 'tab-active' : ''}>
+                  {name}
+                </button>
+              ))}
+            </div>
+            <div className="track-table">
+              <div className="track-row table-head">
+                <span>#</span>
+                <span>TITLE</span>
+                <span>LOCATION</span>
+                <span>TIME</span>
+                <span />
+              </div>
+              {visibleTracks.map((track, index) => (
+                <div
+                  className={`track-row ${currentTrack?.id === track.id ? 'track-current' : ''} ${draggedTrackId === track.id ? 'track-dragging' : ''} ${dropLineClass(index)}`}
+                  key={track.id}
+                  draggable={canReorder}
+                  onDragStart={(event) => {
+                    if (!canReorder) return
+                    setDraggedTrackId(track.id)
+                    if (event.dataTransfer) {
+                      event.dataTransfer.effectAllowed = 'move'
+                      event.dataTransfer.setData('text/plain', track.title)
+                    }
+                  }}
+                  onDragOver={(event) => {
+                    if (draggedTrackId === null) return
+                    event.preventDefault()
+                    setDropSlot(dropSlotAt(event, index))
+                  }}
+                  onDrop={(event) => {
+                    if (draggedTrackId === null) return
+                    event.preventDefault()
+                    dropDraggedTrack(dropSlotAt(event, index))
+                  }}
+                  onDragEnd={endDrag}
+                >
+                  <button
+                    className="track-index track-play"
+                    aria-label={`Play ${track.title}`}
+                    title={`Play ${track.title}`}
+                    onClick={() => playFromList(track, index)}
+                  >
+                    {currentTrack?.id === track.id && playing ? (
+                      <AudioLines size={15} />
+                    ) : (
+                      String(index + 1).padStart(2, '0')
+                    )}
+                  </button>
+                  <span className="track-title-cell">
+                    <button
+                      className="track-art-button"
+                      tabIndex={-1}
+                      aria-hidden="true"
+                      title={currentTrack?.id === track.id && playing ? 'Pause' : `Play ${track.title}`}
+                      onClick={() =>
+                        currentTrack?.id === track.id ? setPlaying(!playing) : playFromList(track, index)
+                      }
+                    >
+                      <TrackArt trackId={track.id} color={coverColors[index % coverColors.length]} iconSize={19} />
+                      <span className="track-art-overlay">
+                        {currentTrack?.id === track.id && playing ? (
+                          <Pause size={15} fill="currentColor" />
+                        ) : (
+                          <Play size={15} fill="currentColor" />
+                        )}
+                      </span>
+                    </button>
+                    <span className="track-meta">
+                      <strong>{track.title}</strong>
+                      <span>{track.artist}</span>
+                    </span>
+                  </span>
+                  <span className="album-name">{track.album || 'Local audio file'}</span>
+                  <span className="track-duration">{formatDuration(track.durationSeconds)}</span>
+                  <span className="track-actions">
+                    <button
+                      className="track-move"
+                      aria-label={`Move ${track.title}`}
+                      title={query ? 'Clear the search to reorder songs' : 'Drag to reorder, or use the ↑ and ↓ keys'}
+                      disabled={!canReorder}
+                      onKeyDown={(event) => handleMoveKey(event, track.id, index)}
+                    >
+                      <GripVertical size={15} />
+                    </button>
+                    <button
+                      className="track-queue"
+                      aria-label={`Add ${track.title} to queue`}
+                      title="Add to queue"
+                      onClick={() => addToQueue(track.id)}
+                    >
+                      <ListPlus size={15} />
+                    </button>
+                    <button
+                      className="track-remove"
+                      aria-label={`Remove ${track.title} from playlist`}
+                      title="Remove from playlist"
+                      onClick={() => void removeTrack(track.id)}
+                    >
+                      <X size={15} />
+                    </button>
+                  </span>
+                </div>
+              ))}
+              <p className="visually-hidden" role="status">
+                {moveStatus}
+              </p>
+              {visibleTracks.length === 0 && (
+                <p className="empty-state">
+                  {query
+                    ? `No songs match “${query}”.`
+                    : selectedPlaylist
+                      ? 'This playlist is empty. Add songs from your music library to get started.'
+                      : 'Create a playlist to get started.'}
+                </p>
+              )}
             </div>
           </section>
-          <footer className="page-footer"><span>Playlist data is stored locally on this device.</span><span>GOODSONGS ®</span></footer>
+          <footer className="page-footer">
+            <span>Playlist data is stored locally on this device.</span>
+            <span>GOODSONGS ®</span>
+          </footer>
         </div>
       </section>
 
-      <footer className="player-bar"><div className="now-playing">{currentTrack ? <TrackArt trackId={currentTrack.id} color={coverColors[activeTrack % coverColors.length]} iconSize={20} className="player-thumb" /> : <span className={`album-thumb player-thumb ${coverColors[activeTrack % coverColors.length]}`}><Disc3 size={20} /></span>}<span className="track-meta"><strong>{currentTrack?.title ?? 'Nothing playing yet'}</strong><span>{currentTrack?.artist ?? 'Choose a song in your playlist'}</span></span><button className={`icon-button like-button ${liked ? 'liked' : ''}`} onClick={() => setLiked(!liked)} aria-label={liked ? 'Unlike song' : 'Like song'} title={liked ? 'Unlike song' : 'Like song'}><Heart size={17} fill={liked ? 'currentColor' : 'none'} /></button></div>
-        <div className="player-controls"><div className="control-buttons"><button className={`icon-button control-muted ${shuffleOrder ? 'control-active' : ''}`} aria-label="Shuffle" title={shuffleOrder ? 'Turn shuffle off' : 'Turn shuffle on'} aria-pressed={shuffleOrder !== null} onClick={toggleShuffle} disabled={!trackCount}><Shuffle size={16} /></button><button className="icon-button control-muted" aria-label="Previous" title="Previous song (restarts the current song if more than 3 seconds in)" onClick={playPrevious} disabled={!currentTrack}><SkipBack size={18} fill="currentColor" /></button><button className="play-button" onClick={() => setPlaying(!playing)} aria-label={playing ? 'Pause' : 'Play'} title={playing ? 'Pause' : 'Play'} disabled={!currentTrack}>{playing ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><button className="icon-button control-muted" aria-label="Next" title="Next song" onClick={playNext} disabled={!currentTrack}><SkipForward size={18} fill="currentColor" /></button><button ref={queueButtonRef} className={`icon-button control-muted queue-button ${queueOpen ? 'control-active' : ''}`} aria-label={queue.length ? `Queue, ${queue.length} queued` : 'Queue'} title={queueOpen ? 'Hide queue' : 'Show queue'} aria-expanded={queueOpen} aria-controls="queue-panel" onClick={() => setQueueOpen(!queueOpen)}><ListMusic size={16} />{queue.length > 0 && <span className="queue-count" aria-hidden="true">{queue.length}</span>}</button></div><div className="progress-row"><span>{formatDuration(Math.floor(position))}</span><div
-          className="progress-hit"
-          role="slider"
-          tabIndex={duration ? 0 : -1}
-          aria-label="Seek"
-          aria-disabled={!duration}
-          aria-valuemin={0}
-          aria-valuemax={Math.floor(duration ?? 0)}
-          aria-valuenow={Math.floor(position)}
-          aria-valuetext={formatDuration(Math.floor(position))}
-          onPointerDown={(event) => { if (!duration) return; event.currentTarget.setPointerCapture(event.pointerId); seekToPointer(event.clientX) }}
-          onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) seekToPointer(event.clientX) }}
-          onKeyDown={handleSeekKey}
-        ><div ref={progressTrackRef} className="progress-track"><span style={{ width: duration ? `${(position / duration) * 100}%` : '0%' }} /></div></div><span>{formatDuration(duration === null ? currentTrack?.durationSeconds ?? null : Math.floor(duration))}</span></div></div>
-        <div className="player-volume"><button className="icon-button control-muted" aria-label="Volume" title="Volume"><Volume2 size={18} /></button><div className="volume-track"><span /></div></div>
+      <footer className="player-bar">
+        <div className="now-playing">
+          {currentTrack ? (
+            <TrackArt
+              trackId={currentTrack.id}
+              color={coverColors[activeTrack % coverColors.length]}
+              iconSize={20}
+              className="player-thumb"
+            />
+          ) : (
+            <span className={`album-thumb player-thumb ${coverColors[activeTrack % coverColors.length]}`}>
+              <Disc3 size={20} />
+            </span>
+          )}
+          <span className="track-meta">
+            <strong>{currentTrack?.title ?? 'Nothing playing yet'}</strong>
+            <span>{currentTrack?.artist ?? 'Choose a song in your playlist'}</span>
+          </span>
+          <button
+            className={`icon-button like-button ${liked ? 'liked' : ''}`}
+            onClick={() => setLiked(!liked)}
+            aria-label={liked ? 'Unlike song' : 'Like song'}
+            title={liked ? 'Unlike song' : 'Like song'}
+          >
+            <Heart size={17} fill={liked ? 'currentColor' : 'none'} />
+          </button>
+        </div>
+        <div className="player-controls">
+          <div className="control-buttons">
+            <button
+              className={`icon-button control-muted ${shuffleOrder ? 'control-active' : ''}`}
+              aria-label="Shuffle"
+              title={shuffleOrder ? 'Turn shuffle off' : 'Turn shuffle on'}
+              aria-pressed={shuffleOrder !== null}
+              onClick={toggleShuffle}
+              disabled={!trackCount}
+            >
+              <Shuffle size={16} />
+            </button>
+            <button
+              className="icon-button control-muted"
+              aria-label="Previous"
+              title="Previous song (restarts the current song if more than 3 seconds in)"
+              onClick={playPrevious}
+              disabled={!currentTrack}
+            >
+              <SkipBack size={18} fill="currentColor" />
+            </button>
+            <button
+              className="play-button"
+              onClick={() => setPlaying(!playing)}
+              aria-label={playing ? 'Pause' : 'Play'}
+              title={playing ? 'Pause' : 'Play'}
+              disabled={!currentTrack}
+            >
+              {playing ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}
+            </button>
+            <button
+              className="icon-button control-muted"
+              aria-label="Next"
+              title="Next song"
+              onClick={playNext}
+              disabled={!currentTrack}
+            >
+              <SkipForward size={18} fill="currentColor" />
+            </button>
+            <button
+              ref={queueButtonRef}
+              className={`icon-button control-muted queue-button ${queueOpen ? 'control-active' : ''}`}
+              aria-label={queue.length ? `Queue, ${queue.length} queued` : 'Queue'}
+              title={queueOpen ? 'Hide queue' : 'Show queue'}
+              aria-expanded={queueOpen}
+              aria-controls="queue-panel"
+              onClick={() => setQueueOpen(!queueOpen)}
+            >
+              <ListMusic size={16} />
+              {queue.length > 0 && (
+                <span className="queue-count" aria-hidden="true">
+                  {queue.length}
+                </span>
+              )}
+            </button>
+          </div>
+          <div className="progress-row">
+            <span>{formatDuration(Math.floor(position))}</span>
+            <div
+              className="progress-hit"
+              role="slider"
+              tabIndex={duration ? 0 : -1}
+              aria-label="Seek"
+              aria-disabled={!duration}
+              aria-valuemin={0}
+              aria-valuemax={Math.floor(duration ?? 0)}
+              aria-valuenow={Math.floor(position)}
+              aria-valuetext={formatDuration(Math.floor(position))}
+              onPointerDown={(event) => {
+                if (!duration) return
+                event.currentTarget.setPointerCapture(event.pointerId)
+                seekToPointer(event.clientX)
+              }}
+              onPointerMove={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) seekToPointer(event.clientX)
+              }}
+              onKeyDown={handleSeekKey}
+            >
+              <div ref={progressTrackRef} className="progress-track">
+                <span style={{ width: duration ? `${(position / duration) * 100}%` : '0%' }} />
+              </div>
+            </div>
+            <span>
+              {formatDuration(duration === null ? (currentTrack?.durationSeconds ?? null) : Math.floor(duration))}
+            </span>
+          </div>
+        </div>
+        <div className="player-volume">
+          <button className="icon-button control-muted" aria-label="Volume" title="Volume">
+            <Volume2 size={18} />
+          </button>
+          <div className="volume-track">
+            <span />
+          </div>
+        </div>
         <audio
           ref={audioRef}
           onTimeUpdate={(event) => setPosition(event.currentTarget.currentTime)}
-          onLoadedMetadata={(event) => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : null)}
+          onLoadedMetadata={(event) =>
+            setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : null)
+          }
           onEnded={handleTrackEnded}
           onError={handlePlaybackError}
         />
       </footer>
-      {queueOpen && <section ref={queuePanelRef} id="queue-panel" className="queue-panel" aria-label="Queue">
-        <div className="queue-header"><h2>Queue</h2><button className="icon-button control-muted" aria-label="Close queue" title="Close queue" onClick={() => setQueueOpen(false)}><X size={15} /></button></div>
-        <div className="queue-scroll">
-          <p className="eyebrow">NOW PLAYING</p>
-          {currentTrack ? queueItem(activeTrack, 'current') : <p className="queue-empty">Nothing playing yet.</p>}
-          {queue.length > 0 && <><div className="queue-section-heading"><p className="eyebrow">NEXT IN QUEUE</p><button className="queue-clear" onClick={() => setQueue([])}>Clear</button></div>
-            {queue.map((trackId, position) => queueItem(selectedPlaylist?.tracks.findIndex((track) => track.id === trackId) ?? -1, 'queued', position))}</>}
-          <p className="eyebrow">NEXT FROM PLAYLIST{shuffleOrder ? ' · SHUFFLED' : ''}</p>
-          {upNext.length ? upNext.map((index) => queueItem(index, 'playlist')) : <p className="queue-empty">{!trackCount ? 'Add songs to this playlist to fill the queue.' : queue.length ? 'Playback stops after the queued songs.' : 'Playback stops after this song.'}</p>}
-        </div>
-      </section>}
-      {nameDialog === 'create' && <NameDialog heading="New playlist" submitLabel="Create" initialValue="" onSubmit={createPlaylist} onClose={() => setNameDialog(null)} />}
-      {nameDialog === 'rename' && selectedPlaylist && <NameDialog heading="Rename playlist" submitLabel="Save" initialValue={selectedPlaylist.title} onSubmit={renamePlaylist} onClose={() => setNameDialog(null)} />}
+      {queueOpen && (
+        <section ref={queuePanelRef} id="queue-panel" className="queue-panel" aria-label="Queue">
+          <div className="queue-header">
+            <h2>Queue</h2>
+            <button
+              className="icon-button control-muted"
+              aria-label="Close queue"
+              title="Close queue"
+              onClick={() => setQueueOpen(false)}
+            >
+              <X size={15} />
+            </button>
+          </div>
+          <div className="queue-scroll">
+            <p className="eyebrow">NOW PLAYING</p>
+            {currentTrack ? queueItem(activeTrack, 'current') : <p className="queue-empty">Nothing playing yet.</p>}
+            {queue.length > 0 && (
+              <>
+                <div className="queue-section-heading">
+                  <p className="eyebrow">NEXT IN QUEUE</p>
+                  <button className="queue-clear" onClick={() => setQueue([])}>
+                    Clear
+                  </button>
+                </div>
+                {queue.map((trackId, position) =>
+                  queueItem(
+                    selectedPlaylist?.tracks.findIndex((track) => track.id === trackId) ?? -1,
+                    'queued',
+                    position,
+                  ),
+                )}
+              </>
+            )}
+            <p className="eyebrow">NEXT FROM PLAYLIST{shuffleOrder ? ' · SHUFFLED' : ''}</p>
+            {upNext.length ? (
+              upNext.map((index) => queueItem(index, 'playlist'))
+            ) : (
+              <p className="queue-empty">
+                {!trackCount
+                  ? 'Add songs to this playlist to fill the queue.'
+                  : queue.length
+                    ? 'Playback stops after the queued songs.'
+                    : 'Playback stops after this song.'}
+              </p>
+            )}
+          </div>
+        </section>
+      )}
+      {nameDialog === 'create' && (
+        <NameDialog
+          heading="New playlist"
+          submitLabel="Create"
+          initialValue=""
+          onSubmit={createPlaylist}
+          onClose={() => setNameDialog(null)}
+        />
+      )}
+      {nameDialog === 'rename' && selectedPlaylist && (
+        <NameDialog
+          heading="Rename playlist"
+          submitLabel="Save"
+          initialValue={selectedPlaylist.title}
+          onSubmit={renamePlaylist}
+          onClose={() => setNameDialog(null)}
+        />
+      )}
     </main>
   )
 }

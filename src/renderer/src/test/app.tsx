@@ -10,7 +10,7 @@ export interface AppHarness {
 }
 
 // Renders the app against an in-memory desktop API and waits for the first playlist to open.
-export async function renderApp(playlists: { title: string, songs?: SongSpec[] }[]): Promise<AppHarness> {
+export async function renderApp(playlists: { title: string; songs?: SongSpec[] }[]): Promise<AppHarness> {
   const desktop = createFakeDesktop(playlists)
   window.desktop = desktop.api
   const user = userEvent.setup()
@@ -30,7 +30,7 @@ function audio(): HTMLAudioElement {
 }
 
 /** What the speakers are playing: the loaded song's title, and whether it's playing or paused. */
-export function player(): { song: string | undefined, playing: boolean, time: number } {
+export function player(): { song: string | undefined; playing: boolean; time: number } {
   const id = /^playlist-audio:\/\/track\/(\d+)$/.exec(audio().src)?.[1]
   return { song: id ? current.titleOf(Number(id)) : undefined, playing: !audio().paused, time: audio().currentTime }
 }
@@ -52,7 +52,9 @@ export function playTo(seconds: number): void {
 }
 
 export function songEnds(): void {
-  act(() => { fireEvent.ended(audio()) })
+  act(() => {
+    fireEvent.ended(audio())
+  })
 }
 
 export function songFailsToLoad(): void {
@@ -66,7 +68,9 @@ export function songButton(title: string): HTMLElement {
 
 /** The visible song list, in order. */
 export function songList(): string[] {
-  return screen.queryAllByRole('button', { name: /^Play / }).map((button) => button.getAttribute('aria-label')!.slice(5))
+  return screen
+    .queryAllByRole('button', { name: /^Play / })
+    .map((button) => button.getAttribute('aria-label')!.slice(5))
 }
 
 /**
@@ -88,8 +92,13 @@ export async function dragSong(title: string, onto: { above: string } | { below:
 
 /** The song's artwork, which doubles as a mouse-only play/pause button (hidden from screen readers). */
 export function artworkButton(title: string): HTMLElement {
-  return screen.getAllByRole('button', { hidden: true }).find((button) =>
-    button.getAttribute('aria-hidden') === 'true' && button.querySelector(`img[src="playlist-audio://artwork/${current.idOf(title)}"]`))!
+  return screen
+    .getAllByRole('button', { hidden: true })
+    .find(
+      (button) =>
+        button.getAttribute('aria-hidden') === 'true' &&
+        button.querySelector(`img[src="playlist-audio://artwork/${current.idOf(title)}"]`),
+    )!
 }
 
 export function playerButton(name: 'Play' | 'Pause' | 'Next' | 'Previous' | 'Shuffle'): HTMLElement {

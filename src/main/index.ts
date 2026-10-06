@@ -62,14 +62,19 @@ function requireCreatePlaylistInput(value: unknown): CreatePlaylistInput {
 }
 
 ipcMain.handle('playlists:list', () => playlistDatabase.list())
-ipcMain.handle('playlists:create', (_event, input: unknown) => playlistDatabase.create(requireCreatePlaylistInput(input)))
+ipcMain.handle('playlists:create', (_event, input: unknown) =>
+  playlistDatabase.create(requireCreatePlaylistInput(input)),
+)
 ipcMain.handle('playlists:rename', (_event, id: unknown, title: unknown) =>
-  playlistDatabase.rename(requireId(id, 'playlist'), requireString(title, 'playlist name')))
+  playlistDatabase.rename(requireId(id, 'playlist'), requireString(title, 'playlist name')),
+)
 ipcMain.handle('playlists:remove', (_event, id: unknown) => playlistDatabase.remove(requireId(id, 'playlist')))
 ipcMain.handle('playlists:remove-track', (_event, playlistId: unknown, trackId: unknown) =>
-  playlistDatabase.removeTrack(requireId(playlistId, 'playlist'), requireId(trackId, 'track')))
+  playlistDatabase.removeTrack(requireId(playlistId, 'playlist'), requireId(trackId, 'track')),
+)
 ipcMain.handle('playlists:move-track', (_event, playlistId: unknown, trackId: unknown, toIndex: unknown) =>
-  playlistDatabase.moveTrack(requireId(playlistId, 'playlist'), requireId(trackId, 'track'), requireIndex(toIndex)))
+  playlistDatabase.moveTrack(requireId(playlistId, 'playlist'), requireId(trackId, 'track'), requireIndex(toIndex)),
+)
 ipcMain.handle('playlists:add-audio-files', async (_event, id: unknown) => {
   const playlistId = requireId(id, 'playlist')
   const result = await dialog.showOpenDialog({

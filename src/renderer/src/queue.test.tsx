@@ -1,10 +1,23 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import {
-  type AppHarness, expectPlaying, openPlaylist, player, playerButton, queueButton, queueContents, queuePanel, renderApp, songButton, songEnds,
+  type AppHarness,
+  expectPlaying,
+  openPlaylist,
+  player,
+  playerButton,
+  queueButton,
+  queueContents,
+  queuePanel,
+  renderApp,
+  songButton,
+  songEnds,
 } from './test/app'
 
-const library = [{ title: 'Mix', songs: ['One', 'Two', 'Three', 'Four', 'Five'] }, { title: 'Other', songs: ['A', 'B'] }]
+const library = [
+  { title: 'Mix', songs: ['One', 'Two', 'Three', 'Four', 'Five'] },
+  { title: 'Other', songs: ['A', 'B'] },
+]
 
 function addToQueue(user: AppHarness['user'], song: string): Promise<void> {
   return user.click(screen.getByRole('button', { name: `Add ${song} to queue` }))
@@ -34,7 +47,12 @@ describe('queue panel', () => {
   it('says when the playlist is empty', async () => {
     const { user } = await renderApp([{ title: 'Empty' }])
     await openQueue(user)
-    expect(queueContents()).toEqual(['NOW PLAYING', 'Nothing playing yet.', 'NEXT FROM PLAYLIST', 'Add songs to this playlist to fill the queue.'])
+    expect(queueContents()).toEqual([
+      'NOW PLAYING',
+      'Nothing playing yet.',
+      'NEXT FROM PLAYLIST',
+      'Add songs to this playlist to fill the queue.',
+    ])
   })
 
   it('labels the upcoming songs as shuffled while shuffle is on', async () => {
@@ -45,9 +63,15 @@ describe('queue panel', () => {
   })
 
   it.each([
-    ['the close button', async (user: AppHarness['user']) => user.click(screen.getByRole('button', { name: 'Close queue' }))],
+    [
+      'the close button',
+      async (user: AppHarness['user']) => user.click(screen.getByRole('button', { name: 'Close queue' })),
+    ],
     ['Escape', async (user: AppHarness['user']) => user.keyboard('{Escape}')],
-    ['clicking elsewhere', async (user: AppHarness['user']) => user.click(screen.getByRole('heading', { level: 2, name: 'Mix' }))],
+    [
+      'clicking elsewhere',
+      async (user: AppHarness['user']) => user.click(screen.getByRole('heading', { level: 2, name: 'Mix' })),
+    ],
     ['the queue button again', async (user: AppHarness['user']) => user.click(queueButton())],
   ])('closes with %s', async (_how, close) => {
     const { user } = await renderApp(library)
@@ -97,7 +121,17 @@ describe('adding to the queue', () => {
     const { user } = await renderApp(library)
     await addToQueue(user, 'Four')
     await openQueue(user)
-    expect(queueContents()).toEqual(['NOW PLAYING', 'One', 'NEXT IN QUEUE', 'Four', 'NEXT FROM PLAYLIST', 'Two', 'Three', 'Four', 'Five'])
+    expect(queueContents()).toEqual([
+      'NOW PLAYING',
+      'One',
+      'NEXT IN QUEUE',
+      'Four',
+      'NEXT FROM PLAYLIST',
+      'Two',
+      'Three',
+      'Four',
+      'Five',
+    ])
   })
 
   it('can queue the same song twice', async () => {
@@ -169,7 +203,17 @@ describe('managing the queue', () => {
     await addToQueue(user, 'Four')
     await openQueue(user)
     await user.click(screen.getByRole('button', { name: 'Remove Two from queue' }))
-    expect(queueContents()).toEqual(['NOW PLAYING', 'One', 'NEXT IN QUEUE', 'Four', 'NEXT FROM PLAYLIST', 'Two', 'Three', 'Four', 'Five'])
+    expect(queueContents()).toEqual([
+      'NOW PLAYING',
+      'One',
+      'NEXT IN QUEUE',
+      'Four',
+      'NEXT FROM PLAYLIST',
+      'Two',
+      'Three',
+      'Four',
+      'Five',
+    ])
   })
 
   it('clears the whole queue', async () => {

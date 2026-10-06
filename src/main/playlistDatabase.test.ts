@@ -98,7 +98,12 @@ describe('songs', () => {
     const playlist = db.list()[0]
     const tracks = db.addAudioFiles(playlist.id, ['/music/First Song.mp3', '/music/second.flac'])[0].tracks
     expect(tracks.map((track) => track.title)).toEqual(['First Song', 'second'])
-    expect(tracks[0]).toMatchObject({ filePath: '/music/First Song.mp3', artist: 'Unknown artist', album: '', durationSeconds: null })
+    expect(tracks[0]).toMatchObject({
+      filePath: '/music/First Song.mp3',
+      artist: 'Unknown artist',
+      album: '',
+      durationSeconds: null,
+    })
   })
 
   it('adds new songs after the existing ones', () => {
@@ -161,9 +166,10 @@ describe('reordering songs', () => {
     return db.list()[playlistIndex].tracks.map((track) => track.title)
   }
 
-  function addSongs(): { playlistId: number, idOf: (title: string) => number } {
+  function addSongs(): { playlistId: number; idOf: (title: string) => number } {
     const playlist = db.list()[0]
-    const tracks = db.addAudioFiles(playlist.id, ['/music/a.mp3', '/music/b.mp3', '/music/c.mp3', '/music/d.mp3'])[0].tracks
+    const tracks = db.addAudioFiles(playlist.id, ['/music/a.mp3', '/music/b.mp3', '/music/c.mp3', '/music/d.mp3'])[0]
+      .tracks
     return { playlistId: playlist.id, idOf: (title) => tracks.find((track) => track.title === title)!.id }
   }
 

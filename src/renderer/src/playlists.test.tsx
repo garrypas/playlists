@@ -5,7 +5,14 @@ import { expectPlaying, openPlaylist, player, renderApp, songButton, songList } 
 import { createFakeDesktop } from './test/fakeDesktop'
 
 const library = [
-  { title: 'Late night drive', songs: [{ title: 'Nightcall', artist: 'Kavinsky', album: 'OutRun' }, { title: 'Midnight City', artist: 'M83', album: 'Hurry Up' }, 'Tenderness'] },
+  {
+    title: 'Late night drive',
+    songs: [
+      { title: 'Nightcall', artist: 'Kavinsky', album: 'OutRun' },
+      { title: 'Midnight City', artist: 'M83', album: 'Hurry Up' },
+      'Tenderness',
+    ],
+  },
   { title: 'Soft focus', songs: ['Holocene'] },
   { title: 'Empty one' },
 ]
@@ -36,7 +43,9 @@ describe('opening the app', () => {
   it('shows a message for an empty playlist', async () => {
     const { user } = await renderApp(library)
     await openPlaylist(user, 'Empty one')
-    expect(screen.getByText('This playlist is empty. Add songs from your music library to get started.')).toBeInTheDocument()
+    expect(
+      screen.getByText('This playlist is empty. Add songs from your music library to get started.'),
+    ).toBeInTheDocument()
   })
 })
 

@@ -20,7 +20,9 @@ const electron = vi.hoisted(() => ({
 vi.mock('electron', () => {
   class BrowserWindow {
     static getAllWindows = () => electron.windows
-    constructor(public options: { webPreferences: Record<string, unknown> }) { electron.windows.push(this) }
+    constructor(public options: { webPreferences: Record<string, unknown> }) {
+      electron.windows.push(this)
+    }
     loadURL = vi.fn(async () => {})
     loadFile = vi.fn(async () => {})
   }
@@ -42,8 +44,12 @@ vi.mock('electron', () => {
     protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
     session: {
       defaultSession: {
-        setPermissionRequestHandler: (handler: Handler) => { electron.permissionRequestHandler = handler },
-        setPermissionCheckHandler: (handler: Handler) => { electron.permissionCheckHandler = handler },
+        setPermissionRequestHandler: (handler: Handler) => {
+          electron.permissionRequestHandler = handler
+        },
+        setPermissionCheckHandler: (handler: Handler) => {
+          electron.permissionCheckHandler = handler
+        },
       },
     },
   }
@@ -72,7 +78,11 @@ beforeEach(() => {
 
 describe('window security', () => {
   it('opens the app window isolated from Node and sandboxed', () => {
-    expect(electron.windows[0].options.webPreferences).toMatchObject({ contextIsolation: true, nodeIntegration: false, sandbox: true })
+    expect(electron.windows[0].options.webPreferences).toMatchObject({
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    })
   })
 
   function fakeWebContents(url: string) {
@@ -81,7 +91,9 @@ describe('window security', () => {
     const contents = {
       getURL: () => url,
       on: (event: string, listener: Handler) => listeners.set(event, listener),
-      setWindowOpenHandler: (handler: Handler) => { windowOpenHandler = handler },
+      setWindowOpenHandler: (handler: Handler) => {
+        windowOpenHandler = handler
+      },
     }
     electron.appListeners.get('web-contents-created')?.({}, contents)
     return { listeners, openWindow: (target: string) => windowOpenHandler({ url: target }) }
@@ -150,15 +162,20 @@ describe('playlist requests from the window', () => {
   it('moves a song within its playlist', async () => {
     const playlist = (await invoke('playlists:list'))[0]
     electron.openDialogResult = { canceled: false, filePaths: ['/music/Move A.mp3', '/music/Move B.mp3'] }
-    const songA = (await invoke('playlists:add-audio-files', playlist.id))[0].tracks.find((track) => track.title === 'Move A')!
+    const songA = (await invoke('playlists:add-audio-files', playlist.id))[0].tracks.find(
+      (track) => track.title === 'Move A',
+    )!
     const tracks = (await invoke('playlists:move-track', playlist.id, songA.id, 99))[0].tracks
     expect(tracks.at(-1)?.title).toBe('Move A')
   })
 
-  it.each(['1', 1.5, -1, null, Number.MAX_SAFE_INTEGER + 1])('rejects the song position %j when moving a song', async (position) => {
-    const playlist = (await invoke('playlists:list'))[0]
-    await expect(invoke('playlists:move-track', playlist.id, 1, position)).rejects.toThrow('Invalid song position.')
-  })
+  it.each(['1', 1.5, -1, null, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects the song position %j when moving a song',
+    async (position) => {
+      const playlist = (await invoke('playlists:list'))[0]
+      await expect(invoke('playlists:move-track', playlist.id, 1, position)).rejects.toThrow('Invalid song position.')
+    },
+  )
 
   it('rejects a name that is not text when renaming', async () => {
     const playlist = (await invoke('playlists:list'))[0]

@@ -50,12 +50,23 @@ export function NameDialog({ heading, submitLabel, initialValue, onSubmit, onClo
           aria-label="Playlist name"
           aria-invalid={error !== null}
           aria-describedby={error ? 'name-dialog-error' : undefined}
-          onChange={(event) => { setName(event.target.value); setError(null) }}
+          onChange={(event) => {
+            setName(event.target.value)
+            setError(null)
+          }}
         />
-        {error && <p id="name-dialog-error" className="name-dialog-error" role="alert">{error}</p>}
+        {error && (
+          <p id="name-dialog-error" className="name-dialog-error" role="alert">
+            {error}
+          </p>
+        )}
         <div className="name-dialog-actions">
-          <button type="button" className="small-action icon-action" onClick={() => dialogRef.current?.close()}>Cancel</button>
-          <button type="submit" className="small-action primary-action" disabled={saving}>{submitLabel}</button>
+          <button type="button" className="small-action icon-action" onClick={() => dialogRef.current?.close()}>
+            Cancel
+          </button>
+          <button type="submit" className="small-action primary-action" disabled={saving}>
+            {submitLabel}
+          </button>
         </div>
       </form>
     </dialog>

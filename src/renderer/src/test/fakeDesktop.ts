@@ -1,7 +1,7 @@
 import type { DesktopApi } from '../../../preload'
 import type { Playlist, PlaylistTrack } from '../../../shared/playlist'
 
-export type SongSpec = string | { title: string, artist?: string, album?: string }
+export type SongSpec = string | { title: string; artist?: string; album?: string }
 
 export interface FakeDesktop {
   api: DesktopApi
@@ -17,12 +17,12 @@ export interface FakeDesktop {
 }
 
 // An in-memory stand-in for the main process, following the same contract: every change returns the full list.
-export function createFakeDesktop(playlists: { title: string, songs?: SongSpec[] }[]): FakeDesktop {
+export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[] }[]): FakeDesktop {
   let nextPlaylistId = 1
   let nextTrackId = 1
   const allTitles = new Map<number, string>()
   let picked: string[] = []
-  let failure: { channel: string, message: string } | null = null
+  let failure: { channel: string; message: string } | null = null
   const calls: string[] = []
 
   function track(spec: SongSpec, position: number, filePath?: string): PlaylistTrack {
@@ -33,7 +33,11 @@ export function createFakeDesktop(playlists: { title: string, songs?: SongSpec[]
   }
 
   let store: Playlist[] = playlists.map(({ title, songs = [] }) => ({
-    id: nextPlaylistId++, title, description: '', gradient: 'sage', icon: '♫',
+    id: nextPlaylistId++,
+    title,
+    description: '',
+    gradient: 'sage',
+    icon: '♫',
     tracks: songs.map((song, position) => track(song, position)),
   }))
 
@@ -58,31 +62,53 @@ export function createFakeDesktop(playlists: { title: string, songs?: SongSpec[]
     getAppInfo: async () => ({ name: 'Playlists', version: '1.0.0', platform: 'darwin' }),
     playlists: {
       list: () => call('playlists:list'),
-      create: (input) => call('playlists:create', () => {
-        store.push({ id: nextPlaylistId++, title: input.title, description: input.description ?? '', gradient: 'sage', icon: '♫', tracks: [] })
-      }),
-      rename: (id, title) => call('playlists:rename', () => { find(id).title = title }),
-      remove: (id) => call('playlists:remove', () => { store = store.filter((playlist) => playlist.id !== id) }),
-      addAudioFiles: (id) => call('playlists:add-audio-files', () => {
-        const playlist = find(id)
-        for (const path of picked) {
-          const title = path.split('/').pop()!.replace(/\.[^.]+$/, '')
-          playlist.tracks.push(track(title, playlist.tracks.length, path))
-        }
-        picked = []
-      }),
-      removeTrack: (playlistId, trackId) => call('playlists:remove-track', () => {
-        const playlist = find(playlistId)
-        playlist.tracks = playlist.tracks.filter((item) => item.id !== trackId)
-      }),
-      moveTrack: (playlistId, trackId, toIndex) => call('playlists:move-track', () => {
-        const playlist = find(playlistId)
-        const from = playlist.tracks.findIndex((item) => item.id === trackId)
-        if (from < 0) throw new Error('Song not found.')
-        const [moved] = playlist.tracks.splice(from, 1)
-        playlist.tracks.splice(Math.min(toIndex, playlist.tracks.length), 0, moved)
-        playlist.tracks.forEach((item, position) => { item.position = position })
-      }),
+      create: (input) =>
+        call('playlists:create', () => {
+          store.push({
+            id: nextPlaylistId++,
+            title: input.title,
+            description: input.description ?? '',
+            gradient: 'sage',
+            icon: '♫',
+            tracks: [],
+          })
+        }),
+      rename: (id, title) =>
+        call('playlists:rename', () => {
+          find(id).title = title
+        }),
+      remove: (id) =>
+        call('playlists:remove', () => {
+          store = store.filter((playlist) => playlist.id !== id)
+        }),
+      addAudioFiles: (id) =>
+        call('playlists:add-audio-files', () => {
+          const playlist = find(id)
+          for (const path of picked) {
+            const title = path
+              .split('/')
+              .pop()!
+              .replace(/\.[^.]+$/, '')
+            playlist.tracks.push(track(title, playlist.tracks.length, path))
+          }
+          picked = []
+        }),
+      removeTrack: (playlistId, trackId) =>
+        call('playlists:remove-track', () => {
+          const playlist = find(playlistId)
+          playlist.tracks = playlist.tracks.filter((item) => item.id !== trackId)
+        }),
+      moveTrack: (playlistId, trackId, toIndex) =>
+        call('playlists:move-track', () => {
+          const playlist = find(playlistId)
+          const from = playlist.tracks.findIndex((item) => item.id === trackId)
+          if (from < 0) throw new Error('Song not found.')
+          const [moved] = playlist.tracks.splice(from, 1)
+          playlist.tracks.splice(Math.min(toIndex, playlist.tracks.length), 0, moved)
+          playlist.tracks.forEach((item, position) => {
+            item.position = position
+          })
+        }),
     },
   }
 
@@ -91,8 +117,12 @@ export function createFakeDesktop(playlists: { title: string, songs?: SongSpec[]
     saved: () => structuredClone(store),
     idOf: (songTitle) => [...allTitles].find(([, title]) => title === songTitle)![0],
     titleOf: (songId) => allTitles.get(songId),
-    pickFiles: (paths) => { picked = paths },
-    failNext: (channel, message) => { failure = { channel, message } },
+    pickFiles: (paths) => {
+      picked = paths
+    },
+    failNext: (channel, message) => {
+      failure = { channel, message }
+    },
     calls,
   }
 }

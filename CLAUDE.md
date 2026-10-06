@@ -29,7 +29,7 @@ This is a playlist app. It should allow users to create and modify playlists of 
 
 ## Coding guidelines
 
-- **Language and style:** TypeScript with `strict`, `noUnusedLocals` and `noUnusedParameters`. No linter or formatter is configured yet; match the surrounding code (no semicolons, single quotes, 2-space indent).
+- **Language and style:** TypeScript with `strict`, `noUnusedLocals` and `noUnusedParameters`. Prettier (`.prettierrc`: no semicolons, single quotes, 2-space indent, 120-char lines) formats files on save in VS Code via `.vscode/settings.json`. No linter is configured yet.
 - **Naming conventions:** <!-- Add preferred naming patterns -->
 - **UI conventions:** <!-- Add component, styling, and accessibility expectations -->
 - **State/data handling:** The SQLite database (`sql.js`) lives only in the main process (`src/main/playlistDatabase.ts`) and is saved to `playlists.sqlite3` in Electron's `userData` folder after every write. Mutating IPC calls return the full, updated playlist list, and the renderer replaces its state with it.

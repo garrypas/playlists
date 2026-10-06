@@ -11,7 +11,9 @@ const electron = vi.hoisted(() => ({
 vi.mock('electron', () => ({
   protocol: {
     registerSchemesAsPrivileged: vi.fn(),
-    handle: (_scheme: string, handler: (request: Request) => Response | Promise<Response>) => { electron.handler = handler },
+    handle: (_scheme: string, handler: (request: Request) => Response | Promise<Response>) => {
+      electron.handler = handler
+    },
   },
 }))
 
@@ -21,10 +23,15 @@ const png = Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010806000
 const audioBytes = Buffer.from('0123456789abcdefghij')
 
 // A minimal MP3: an ID3v2.3 tag (optionally holding a cover picture) followed by two silent MPEG frames.
-function mp3(picture?: { mimeType: string, data: Buffer }): Buffer {
+function mp3(picture?: { mimeType: string; data: Buffer }): Buffer {
   const frames: Buffer[] = []
   if (picture) {
-    const body = Buffer.concat([Buffer.from([0]), Buffer.from(`${picture.mimeType}\0`), Buffer.from([3, 0]), picture.data])
+    const body = Buffer.concat([
+      Buffer.from([0]),
+      Buffer.from(`${picture.mimeType}\0`),
+      Buffer.from([3, 0]),
+      picture.data,
+    ])
     const size = Buffer.alloc(4)
     size.writeUInt32BE(body.length)
     frames.push(Buffer.concat([Buffer.from('APIC'), size, Buffer.from([0, 0]), body]))

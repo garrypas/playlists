@@ -1,7 +1,16 @@
 import { fireEvent, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import {
-  expectPlaying, openPlaylist, player, playerButton, playTo, renderApp, songButton, songEnds, songFailsToLoad, songLoaded,
+  expectPlaying,
+  openPlaylist,
+  player,
+  playerButton,
+  playTo,
+  renderApp,
+  songButton,
+  songEnds,
+  songFailsToLoad,
+  songLoaded,
 } from './test/app'
 
 const songs = ['One', 'Two', 'Three', 'Four', 'Five']
@@ -218,7 +227,10 @@ describe('shuffle', () => {
   })
 
   it('stays on, reshuffled, when switching playlists', async () => {
-    const { user } = await renderApp([{ title: 'Mix', songs }, { title: 'Other', songs: ['A', 'B', 'C'] }])
+    const { user } = await renderApp([
+      { title: 'Mix', songs },
+      { title: 'Other', songs: ['A', 'B', 'C'] },
+    ])
     await user.click(playerButton('Shuffle'))
     await openPlaylist(user, 'Other')
     expect(playerButton('Shuffle')).toHaveAttribute('aria-pressed', 'true')

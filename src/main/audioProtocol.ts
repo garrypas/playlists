@@ -67,7 +67,11 @@ export function handleAudioRequests(getTrackFilePath: (trackId: number) => strin
     }
     return new Response(streamFile(filePath, start, end), {
       status: 206,
-      headers: { ...headers, 'Content-Length': String(end - start + 1), 'Content-Range': `bytes ${start}-${end}/${size}` },
+      headers: {
+        ...headers,
+        'Content-Length': String(end - start + 1),
+        'Content-Range': `bytes ${start}-${end}/${size}`,
+      },
     })
   })
 }

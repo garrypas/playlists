@@ -3,4 +3,4 @@ out/
 release/
 dist/
 .DS_Store
-tsconfig.node.tsbuildinfo
+*tsbuildinfo

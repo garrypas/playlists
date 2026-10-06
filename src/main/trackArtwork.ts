@@ -9,10 +9,10 @@ export interface TrackArtwork {
 const imageTypes: Record<string, string> = {
   'image/jpeg': 'image/jpeg',
   'image/jpg': 'image/jpeg',
-  'jpg': 'image/jpeg',
-  'jpeg': 'image/jpeg',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
   'image/png': 'image/png',
-  'png': 'image/png',
+  png: 'image/png',
   'image/gif': 'image/gif',
   'image/webp': 'image/webp',
   'image/bmp': 'image/bmp',

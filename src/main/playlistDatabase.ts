@@ -37,11 +37,14 @@ export class PlaylistDatabase {
     )
     return playlists.map((playlist) => ({
       ...playlist,
-      tracks: this.query<PlaylistTrack>(`
+      tracks: this.query<PlaylistTrack>(
+        `
         SELECT id, file_path AS filePath, title, artist, album,
           duration_seconds AS durationSeconds, position
         FROM playlist_tracks WHERE playlist_id = ? ORDER BY position, id
-      `, [playlist.id]),
+      `,
+        [playlist.id],
+      ),
     }))
   }
 
@@ -72,10 +75,13 @@ export class PlaylistDatabase {
     try {
       for (const filePath of filePaths) {
         const title = basename(filePath, extname(filePath)).trim() || 'Untitled track'
-        this.run(`
+        this.run(
+          `
           INSERT OR IGNORE INTO playlist_tracks (playlist_id, file_path, title, position)
           VALUES (?, ?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = ?))
-        `, [playlistId, filePath, title, playlistId])
+        `,
+          [playlistId, filePath, title, playlistId],
+        )
       }
       this.db.run('COMMIT')
     } catch (error) {
@@ -100,7 +106,8 @@ export class PlaylistDatabase {
     if (!Number.isSafeInteger(trackId) || trackId < 1) throw new Error('Invalid track ID.')
     if (!Number.isSafeInteger(toIndex) || toIndex < 0) throw new Error('Invalid song position.')
     const ids = this.query<{ id: number }>(
-      'SELECT id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position, id', [playlistId],
+      'SELECT id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position, id',
+      [playlistId],
     ).map((row) => row.id)
     const from = ids.indexOf(trackId)
     if (from < 0) throw new Error('Song not found.')
@@ -119,7 +126,9 @@ export class PlaylistDatabase {
   }
 
   getTrackFilePath(trackId: number): string | undefined {
-    return this.query<{ filePath: string }>('SELECT file_path AS filePath FROM playlist_tracks WHERE id = ?', [trackId])[0]?.filePath
+    return this.query<{ filePath: string }>('SELECT file_path AS filePath FROM playlist_tracks WHERE id = ?', [
+      trackId,
+    ])[0]?.filePath
   }
 
   close(): void {
@@ -206,13 +215,18 @@ export class PlaylistDatabase {
   }
 
   private seedStarterPlaylists(): void {
-    const seeded = this.query<{ value: string }>('SELECT value FROM app_meta WHERE key = ?', ['starter_playlists_seeded'])
+    const seeded = this.query<{ value: string }>('SELECT value FROM app_meta WHERE key = ?', [
+      'starter_playlists_seeded',
+    ])
     if (seeded.length > 0) return
     this.db.run('BEGIN')
     try {
       for (const playlist of starterPlaylists) {
         this.run('INSERT INTO playlists (title, description, gradient, icon) VALUES (?, ?, ?, ?)', [
-          playlist.title, playlist.description, playlist.gradient, playlist.icon,
+          playlist.title,
+          playlist.description,
+          playlist.gradient,
+          playlist.icon,
         ])
       }
       this.run('INSERT INTO app_meta (key, value) VALUES (?, ?)', ['starter_playlists_seeded', '1'])
@@ -227,4 +241,3 @@ export class PlaylistDatabase {
 export async function openPlaylistDatabase(userDataPath: string): Promise<PlaylistDatabase> {
   return PlaylistDatabase.open(join(userDataPath, 'playlists.sqlite3'))
 }
-
