@@ -1,6 +1,7 @@
 name: Release
 
-# Push a tag that matches package.json's version (e.g. `npm version patch && git push --follow-tags`).
+# Push a `v*` tag (e.g. `git tag v1.2.0 && git push origin v1.2.0`) or create a release with a new tag on GitHub.
+# The app is built with the tag's version, whatever package.json says.
 on:
   push:
     tags: ['v*']
@@ -41,14 +42,10 @@ jobs:
           node-version: 24
           cache: npm
 
-      - name: Check tag matches package.json version
+      # The tag is the source of truth for the version; npm rejects tags that aren't valid semver (e.g. v1.2).
+      - name: Set version from tag
         shell: bash
-        run: |
-          version="v$(node -p "require('./package.json').version")"
-          if [ "$version" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
-            exit 1
-          fi
+        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
 
       - name: Install dependencies
         run: npm ci
@@ -78,7 +75,13 @@ jobs:
           path: installers
           merge-multiple: true
 
-      - name: Create release
+      # Attach to the release if one was already created for this tag (e.g. by hand on GitHub), otherwise create it.
+      - name: Create or update release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" installers/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" installers/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" installers/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+          fi
