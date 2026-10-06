@@ -14,6 +14,7 @@ This is a playlist app. It should allow users to create and modify playlists of 
 - Install dependencies: `npm install`
 - Run the desktop app: `npm run dev`
 - Check TypeScript: `npm run typecheck`
+- Run tests: `npm test` (or `npm run test:watch`)
 - Build: `npm run build`
 - Package an unpacked app: `npm run package`
 - Create platform installers: `npm run make`
@@ -32,7 +33,11 @@ This is a playlist app. It should allow users to create and modify playlists of 
 - **Naming conventions:** <!-- Add preferred naming patterns -->
 - **UI conventions:** <!-- Add component, styling, and accessibility expectations -->
 - **State/data handling:** The SQLite database (`sql.js`) lives only in the main process (`src/main/playlistDatabase.ts`) and is saved to `playlists.sqlite3` in Electron's `userData` folder after every write. Mutating IPC calls return the full, updated playlist list, and the renderer replaces its state with it.
-- **Testing:** No test framework yet. Until one is added, `npm run typecheck` and `npm run build` are the only automated checks.
+- **Testing:** Vitest. Main-process tests (`src/main/*.test.ts`) run in Node against a real sql.js database in a temp folder, with Electron stubbed. Renderer tests (`src/renderer/src/*.test.tsx`) use jsdom and Testing Library against an in-memory desktop API (`src/renderer/src/test/`).
+  - **Test behavior, not implementation.** Write each test as something a user (or the window, for main-process code) does and what they observe. Find elements by role and accessible name, use `userEvent`, and assert on what's shown, what's saved and what's playing (the `player()` helper reads the `<audio>` element). Never assert on component state, internal function calls, CSS classes or markup structure. A refactor that keeps behavior the same must not break a test.
+  - Test names describe behavior in plain words ("stops after the last song finishes"), not functions ("advance returns false").
+  - Cover the edge cases listed in the product agent: empty playlist, last song, shuffle on, removed or missing songs, switching playlists, duplicates.
+  - Extend the shared helpers (`src/renderer/src/test/app.tsx`, `fakeDesktop.ts`) rather than reaching into the DOM in individual tests. Don't stub what you're testing; stub only what jsdom or Node can't provide (Electron, media playback, dialogs).
 
 ## Architecture and security rules
 
@@ -47,7 +52,7 @@ This is a playlist app. It should allow users to create and modify playlists of 
 ## Workflow for changes
 
 1. <!-- Add any required planning or review steps -->
-2. Run `npm run typecheck` and `npm run build` before considering code changes complete.
+2. Every change that adds or alters behavior adds or updates tests in the same task, and every bug fix gets a test that fails without the fix. Run `npm test`, `npm run typecheck` and `npm run build` before considering code changes complete.
 3. For UI changes, run `npm run dev` and check the change in the app.
 4. Keep the product agent (`.claude/agents/product.md`) current. When a change adds, alters or removes user-visible behavior, or the user states a new requirement or product decision, update it in the same task:
    - Move shipped items from "Not built" to "Current behavior", describing behavior and edge cases, not implementation.

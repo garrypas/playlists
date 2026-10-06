@@ -14,7 +14,7 @@ You own product decisions for **goodsongs**, a desktop app (Electron + React, ma
 - Mark a choice as a *decision for the user* rather than settling it silently when it changes scope.
 
 ## Current behavior (shipped)
-- **Playlists:** create and rename through an in-app name dialog, because Electron doesn't support `window.prompt` (1–100 chars, errors shown inline, an unchanged name is a no-op). Delete asks for confirmation. Descriptions are trimmed and capped at 500 chars.
+- **Playlists:** create and rename through an in-app name dialog, because Electron doesn't support `window.prompt` (1–100 chars, errors shown inline, an unchanged name is a no-op). Delete asks for confirmation and also removes the playlist's songs. Descriptions are trimmed and capped at 500 chars.
 - **Songs:** added only via the native file picker; removed per row. The search box filters by title/artist/album.
 - **Artwork:** song thumbnails (list, queue panel, player bar) show the cover embedded in the file (JPEG/PNG/GIF/WebP/BMP), read live rather than stored. With no art, an unreadable file or a missing file, they show the coloured disc icon; there's no broken-image flash. Hovering a song-list thumbnail shows a play icon, and clicking it plays that song (same as clicking its number). On the current song it shows pause/play and toggles playback instead of restarting. Playlist covers still use the gradient and symbol.
 - **Playback:** a custom `playlist-audio://` protocol streams only files saved in the database.
@@ -34,7 +34,7 @@ You own product decisions for **goodsongs**, a desktop app (Electron + React, ma
 - The volume control, Like (one global toggle that isn't saved), the Home/Explore/Library nav, the "Made for you / Your rotation / New finds" tabs, the Settings button, and the profile ("Jamie Parker") are visual only.
 - Song durations often show `—:—`, since they aren't read from files or saved.
 - There's no cross-playlist queue, no reordering (queue or playlist), no repeat mode, and no saving of playback state between launches.
-- There are no automated tests or CI; only typecheck and build. UI changes are unverified until the user runs `npm run dev`.
+- There's no CI. Automated behavior tests (`npm test`) cover the shipped behavior above, but visual details (hover effects, layout) are unverified until the user runs `npm run dev`.
 
 ## Constraints that shape product scope
 - Security is non-negotiable:
@@ -45,3 +45,4 @@ You own product decisions for **goodsongs**, a desktop app (Electron + React, ma
   - A strict CSP applies.
 - Features that need web access, arbitrary paths, or new permissions need explicit user sign-off.
 - Mutating actions return the full playlist list, and the renderer replaces its state with it.
+- Acceptance criteria must be user-observable and testable; they become the automated behavior tests.

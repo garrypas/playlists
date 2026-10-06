@@ -25,6 +25,7 @@ export class PlaylistDatabase {
     const store = new PlaylistDatabase(new SQL.Database(bytes), filePath)
     store.db.run('PRAGMA foreign_keys = ON')
     store.initializeSchema()
+    store.removeOrphanedTracks()
     store.seedStarterPlaylists()
     store.persist()
     return store
@@ -151,6 +152,13 @@ export class PlaylistDatabase {
     const temporaryPath = `${this.filePath}.tmp`
     writeFileSync(temporaryPath, this.db.export())
     renameSync(temporaryPath, this.filePath)
+    // sql.js's export() turns foreign keys off, which would stop deletes cascading to songs.
+    this.db.run('PRAGMA foreign_keys = ON')
+  }
+
+  // Older builds lost foreign keys after the first save, so deleted playlists could leave their songs behind.
+  private removeOrphanedTracks(): void {
+    this.run('DELETE FROM playlist_tracks WHERE playlist_id NOT IN (SELECT id FROM playlists)')
   }
 
   private requirePlaylist(id: number): number {
