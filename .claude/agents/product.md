@@ -43,6 +43,7 @@ You own product decisions for **goodsongs**, a desktop app (Electron + React, ma
   - The queue clears when you switch or delete a playlist. A song removed from the playlist leaves the queue.
 
 ## Not built / placeholders (backlog candidates)
+- Release installers (GitHub releases) are unsigned, so macOS Gatekeeper and Windows SmartScreen warn on first open; there are no automatic updates.
 - The volume control, Like (one global toggle that isn't saved), the "Made for you / Your rotation / New finds" tabs, and the Settings button are visual only.
 - Tags can't be edited in the app or re-read after a file changes. The first launch after upgrading reads every saved song's tags before the window opens, which may take a few seconds for a large collection.
 - Explore and Your library have no "Add to queue" (the queue only holds songs from the list that's playing), and no way to remove a song from every playlist at once. Explore has no album filter.
