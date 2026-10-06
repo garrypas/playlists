@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { CreatePlaylistInput } from '../shared/playlist'
 import { handleAudioRequests, registerAudioScheme } from './audioProtocol'
 import { openPlaylistDatabase, PlaylistDatabase } from './playlistDatabase'
+import { readTagsForFiles } from './trackMetadata'
 
 registerAudioScheme()
 
@@ -85,7 +86,7 @@ ipcMain.handle('playlists:add-audio-files', async (_event, id: unknown) => {
     filters: [{ name: 'Audio', extensions: ['mp3', 'm4a', 'aac', 'wav', 'aiff', 'flac', 'ogg', 'opus'] }],
   })
   if (result.canceled || result.filePaths.length === 0) return playlistDatabase.list()
-  return playlistDatabase.addAudioFiles(playlistId, result.filePaths)
+  return playlistDatabase.addAudioFiles(playlistId, result.filePaths, await readTagsForFiles(result.filePaths))
 })
 
 // The app never needs popups, external navigation, or device permissions.
@@ -103,6 +104,8 @@ app.whenReady().then(async () => {
 
   try {
     playlistDatabase = await openPlaylistDatabase(app.getPath('userData'))
+    // Songs added before tags were read (or whose files were unreadable last time) get their tags now.
+    playlistDatabase.saveTags(await readTagsForFiles(playlistDatabase.filesNeedingTags()))
     handleAudioRequests((trackId) => playlistDatabase.getTrackFilePath(trackId))
     createWindow()
 

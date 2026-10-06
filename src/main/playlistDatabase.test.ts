@@ -1,6 +1,7 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import initSqlJs from 'sql.js'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { openPlaylistDatabase, type PlaylistDatabase } from './playlistDatabase'
 
@@ -261,5 +262,75 @@ describe('saving', () => {
     const before = db.list()
     await reopen()
     expect(db.list()).toEqual(before)
+  })
+})
+
+describe('song details from tags', () => {
+  const tags = new Map([
+    [
+      '/music/a.mp3',
+      { title: 'Nightcall', artist: 'Kavinsky', album: 'OutRun', albumArtist: 'Kavinsky', trackNumber: 3, discNumber: 1, durationSeconds: 258 },
+    ],
+  ])
+
+  it('saves what the tags say, and falls back to the file name for the rest', () => {
+    const playlist = db.list()[0]
+    const [tagged, plain] = db.addAudioFiles(playlist.id, ['/music/a.mp3', '/music/b.mp3'], tags)[0].tracks
+    expect(tagged).toMatchObject({
+      title: 'Nightcall',
+      artist: 'Kavinsky',
+      album: 'OutRun',
+      albumArtist: 'Kavinsky',
+      trackNumber: 3,
+      discNumber: 1,
+      durationSeconds: 258,
+    })
+    expect(plain).toMatchObject({ title: 'b', artist: 'Unknown artist', album: '', albumArtist: '', trackNumber: null })
+  })
+
+  it('copies the details when a song is added to another playlist', () => {
+    const [first, second] = db.list()
+    const song = db.addAudioFiles(first.id, ['/music/a.mp3'], tags)[0].tracks[0]
+    const copy = db.addTrack(second.id, song.id)[1].tracks[0]
+    expect(copy).toMatchObject({ title: 'Nightcall', album: 'OutRun', trackNumber: 3, durationSeconds: 258 })
+  })
+
+  it('updates every copy of a file once its tags are read, and stops asking for them', () => {
+    const [first, second] = db.list()
+    db.addAudioFiles(first.id, ['/music/a.mp3', '/music/b.mp3'])
+    db.addAudioFiles(second.id, ['/music/a.mp3'])
+    expect(db.filesNeedingTags()).toEqual(['/music/a.mp3', '/music/b.mp3'])
+    db.saveTags(tags)
+    const updated = db.list()
+    expect(updated[0].tracks[0].title).toBe('Nightcall')
+    expect(updated[1].tracks[0].title).toBe('Nightcall')
+    expect(db.filesNeedingTags()).toEqual(['/music/b.mp3'])
+  })
+
+  it('upgrades a database saved by an older version, keeping its songs', async () => {
+    db.close()
+    rmSync(userData, { recursive: true, force: true })
+    userData = mkdtempSync(join(tmpdir(), 'playlists-test-'))
+    const SQL = await initSqlJs()
+    const old = new SQL.Database()
+    old.run(`
+      CREATE TABLE playlists (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '', gradient TEXT NOT NULL DEFAULT 'sage', icon TEXT NOT NULL DEFAULT '♫',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE playlist_tracks (id INTEGER PRIMARY KEY AUTOINCREMENT,
+        playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE, file_path TEXT NOT NULL,
+        title TEXT NOT NULL, artist TEXT NOT NULL DEFAULT 'Unknown artist', album TEXT NOT NULL DEFAULT '',
+        duration_seconds INTEGER, position INTEGER NOT NULL, added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (playlist_id, file_path));
+      CREATE TABLE app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      INSERT INTO app_meta VALUES ('starter_playlists_seeded', '1');
+      INSERT INTO playlists (title) VALUES ('Old favourites');
+      INSERT INTO playlist_tracks (playlist_id, file_path, title, position) VALUES (1, '/music/old.mp3', 'old', 0);
+    `)
+    writeFileSync(join(userData, 'playlists.sqlite3'), old.export())
+    db = await openPlaylistDatabase(userData)
+    expect(db.list()[0]).toMatchObject({ title: 'Old favourites' })
+    expect(db.list()[0].tracks[0]).toMatchObject({ title: 'old', albumArtist: '', trackNumber: null, discNumber: null })
+    expect(db.filesNeedingTags()).toEqual(['/music/old.mp3'])
   })
 })

@@ -506,3 +506,121 @@ button.queue-item:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Your library: album and artist grids, and the album/artist page. */
+.library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 13px;
+  margin-top: 6px;
+}
+
+.library-card {
+  min-width: 0;
+  padding: 9px;
+  border-radius: 9px;
+  background: #171716;
+  text-align: left;
+  transition:
+    background 0.15s,
+    transform 0.15s;
+}
+
+.library-card:hover {
+  background: #1d1d1b;
+  transform: translateY(-2px);
+}
+
+.library-card .card-copy span {
+  color: #898880;
+  font-size: 10px;
+}
+
+.album-thumb.library-card-art,
+.library-card .library-avatar {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  border-radius: 7px;
+}
+
+.library-avatar {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: linear-gradient(140deg, #a888a0, #51405a);
+  color: rgba(255, 255, 255, 0.85);
+  font: 600 34px 'Manrope', sans-serif;
+}
+
+.library-card .library-avatar {
+  border-radius: 50%;
+}
+
+.library-avatar.amber {
+  background: linear-gradient(140deg, #e2bb72, #886348);
+}
+
+.library-avatar.sky {
+  background: linear-gradient(140deg, #90bec3, #4c6673);
+}
+
+.library-avatar.rose {
+  background: linear-gradient(140deg, #d29e99, #704f65);
+}
+
+.library-avatar.mint {
+  background: linear-gradient(140deg, #9bb9a5, #4c665d);
+}
+
+.library-back {
+  margin-bottom: 12px;
+}
+
+.library-detail-header {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.library-detail-header > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.library-detail-header h2 {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.album-thumb.library-detail-art,
+.library-avatar.library-detail-art {
+  width: 96px;
+  height: 96px;
+  border-radius: 9px;
+}
+
+.library-avatar.library-detail-art {
+  border-radius: 50%;
+}
+
+.library-play {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+ul.library-grid {
+  padding: 0;
+  list-style: none;
+}
+
+.library-grid > li {
+  min-width: 0;
+}
+
+.library-grid .library-card {
+  width: 100%;
+}

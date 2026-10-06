@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { handleAudioRequests } from './audioProtocol'
+import { mp3 } from './test/mp3'
 
 const electron = vi.hoisted(() => ({
   handler: undefined as ((request: Request) => Response | Promise<Response>) | undefined,
@@ -22,28 +23,6 @@ const files: Record<number, string> = {}
 const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489', 'hex')
 const audioBytes = Buffer.from('0123456789abcdefghij')
 
-// A minimal MP3: an ID3v2.3 tag (optionally holding a cover picture) followed by two silent MPEG frames.
-function mp3(picture?: { mimeType: string; data: Buffer }): Buffer {
-  const frames: Buffer[] = []
-  if (picture) {
-    const body = Buffer.concat([
-      Buffer.from([0]),
-      Buffer.from(`${picture.mimeType}\0`),
-      Buffer.from([3, 0]),
-      picture.data,
-    ])
-    const size = Buffer.alloc(4)
-    size.writeUInt32BE(body.length)
-    frames.push(Buffer.concat([Buffer.from('APIC'), size, Buffer.from([0, 0]), body]))
-  }
-  const tag = Buffer.concat(frames)
-  const n = tag.length
-  const header = Buffer.from([0x49, 0x44, 0x33, 3, 0, 0, (n >> 21) & 127, (n >> 14) & 127, (n >> 7) & 127, n & 127])
-  const frame = Buffer.alloc(417)
-  frame.set([0xff, 0xfb, 0x90, 0x64])
-  return Buffer.concat([header, tag, frame, frame])
-}
-
 function save(trackId: number, name: string, contents: Buffer): void {
   files[trackId] = join(folder, name)
   writeFileSync(files[trackId], contents)
@@ -56,9 +35,9 @@ function request(url: string, headers: Record<string, string> = {}): Promise<Res
 beforeAll(() => {
   folder = mkdtempSync(join(tmpdir(), 'playlists-audio-'))
   save(1, 'song.mp3', audioBytes)
-  save(2, 'with-cover.mp3', mp3({ mimeType: 'image/png', data: png }))
+  save(2, 'with-cover.mp3', mp3({ picture: { mimeType: 'image/png', data: png } }))
   save(3, 'no-cover.mp3', mp3())
-  save(4, 'svg-cover.mp3', mp3({ mimeType: 'image/svg+xml', data: Buffer.from('<svg/>') }))
+  save(4, 'svg-cover.mp3', mp3({ picture: { mimeType: 'image/svg+xml', data: Buffer.from('<svg/>') } }))
   save(5, 'empty.wav', Buffer.alloc(0))
   files[6] = join(folder, 'deleted.mp3')
   handleAudioRequests((trackId) => files[trackId])

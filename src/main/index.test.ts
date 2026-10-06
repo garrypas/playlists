@@ -1,8 +1,10 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Playlist } from '../shared/playlist'
+import { openPlaylistDatabase } from './playlistDatabase'
+import { mp3 } from './test/mp3'
 
 type Handler = (...args: unknown[]) => unknown
 
@@ -61,8 +63,25 @@ function invoke<T = Playlist[]>(channel: string, ...args: unknown[]): Promise<T>
   return Promise.resolve().then(() => handler({}, ...args) as T)
 }
 
+// Real audio files with tags, for the dialog to "pick".
+let music: string
+const tagged = (): string => join(music, 'tagged.mp3')
+const untagged = (): string => join(music, '04 untagged.mp3')
+const savedEarlier = (): string => join(music, 'saved-earlier.mp3')
+
 beforeAll(async () => {
   electron.userData = mkdtempSync(join(tmpdir(), 'playlists-main-'))
+  music = mkdtempSync(join(tmpdir(), 'playlists-music-'))
+  writeFileSync(
+    tagged(),
+    mp3({ title: 'Nightcall', artist: 'Kavinsky', album: 'OutRun', albumArtist: 'Kavinsky', track: '3/12', disc: '1/2' }),
+  )
+  writeFileSync(untagged(), mp3())
+  writeFileSync(savedEarlier(), mp3({ title: 'Wait', artist: 'M83', album: 'Hurry Up, We’re Dreaming' }))
+  // Songs saved by a version that didn't read tags: one real file, and one that has since been deleted.
+  const earlier = await openPlaylistDatabase(electron.userData)
+  earlier.addAudioFiles(earlier.list()[3].id, [savedEarlier(), join(music, 'deleted.mp3')])
+  earlier.close()
   await import('./index')
   await vi.waitFor(() => expect(electron.windows).toHaveLength(1))
 })
@@ -70,6 +89,7 @@ beforeAll(async () => {
 afterAll(() => {
   electron.appListeners.get('before-quit')?.()
   rmSync(electron.userData, { recursive: true, force: true })
+  rmSync(music, { recursive: true, force: true })
 })
 
 beforeEach(() => {
@@ -209,6 +229,31 @@ describe('adding songs', () => {
     expect(updated[0].tracks.map((track) => track.filePath)).toContain('/music/Picked.mp3')
   })
 
+  it("saves each song's title, artist, album, album artist, track and disc from its tags", async () => {
+    const playlist = (await invoke('playlists:list'))[2]
+    electron.openDialogResult = { canceled: false, filePaths: [tagged()] }
+    const song = (await invoke('playlists:add-audio-files', playlist.id))[2].tracks.find(
+      (track) => track.filePath === tagged(),
+    )
+    expect(song).toMatchObject({
+      title: 'Nightcall',
+      artist: 'Kavinsky',
+      album: 'OutRun',
+      albumArtist: 'Kavinsky',
+      trackNumber: 3,
+      discNumber: 1,
+    })
+  })
+
+  it('names a song without tags after its file', async () => {
+    const playlist = (await invoke('playlists:list'))[2]
+    electron.openDialogResult = { canceled: false, filePaths: [untagged()] }
+    const song = (await invoke('playlists:add-audio-files', playlist.id))[2].tracks.find(
+      (track) => track.filePath === untagged(),
+    )
+    expect(song).toMatchObject({ title: '04 untagged', artist: 'Unknown artist', album: '', trackNumber: null })
+  })
+
   it('changes nothing when the user cancels the dialog', async () => {
     const before = await invoke('playlists:list')
     expect(await invoke('playlists:add-audio-files', before[0].id)).toEqual(before)
@@ -218,5 +263,24 @@ describe('adding songs', () => {
     const playlist = (await invoke('playlists:list'))[1]
     const updated = await invoke('playlists:add-audio-files', playlist.id, ['/etc/passwd'])
     expect(updated[1].tracks).toEqual(playlist.tracks)
+  })
+})
+
+describe('songs saved before tags were read', () => {
+  it('get their tags when the app starts', async () => {
+    const songs = (await invoke('playlists:list'))[3].tracks
+    expect(songs.find((track) => track.filePath === savedEarlier())).toMatchObject({
+      title: 'Wait',
+      artist: 'M83',
+      album: 'Hurry Up, We’re Dreaming',
+    })
+  })
+
+  it('keep their file name when the file is missing', async () => {
+    const songs = (await invoke('playlists:list'))[3].tracks
+    expect(songs.find((track) => track.filePath.endsWith('deleted.mp3'))).toMatchObject({
+      title: 'deleted',
+      artist: 'Unknown artist',
+    })
   })
 })

@@ -69,7 +69,7 @@ export function songButton(title: string): HTMLElement {
 /** The visible song list, in order. */
 export function songList(): string[] {
   return screen
-    .queryAllByRole('button', { name: /^Play / })
+    .queryAllByRole('button', { name: /^Play (?!all$)/ })
     .map((button) => button.getAttribute('aria-label')!.slice(5))
 }
 
@@ -111,6 +111,26 @@ export function openPlaylist(user: AppHarness['user'], title: string): Promise<v
 
 export function openExplore(user: AppHarness['user']): Promise<void> {
   return user.click(screen.getByRole('button', { name: 'Explore' }))
+}
+
+export function openLibrary(user: AppHarness['user']): Promise<void> {
+  return user.click(screen.getByRole('button', { name: 'Your library' }))
+}
+
+/** The album or artist cards in Your library's grid, as screen readers announce them, in order. */
+export function libraryCards(kind: 'Albums' | 'Artists'): string[] {
+  return within(screen.getByRole('list', { name: kind }))
+    .getAllByRole('button')
+    .map((button) => button.getAttribute('aria-label') ?? '')
+}
+
+/** Opens Your library, then an album or artist from its grid. */
+export async function openInLibrary(user: AppHarness['user'], kind: 'Albums' | 'Artists', name: string): Promise<void> {
+  if (!screen.queryByRole('group', { name: 'Browse by' })) await openLibrary(user)
+  await user.click(within(screen.getByRole('group', { name: 'Browse by' })).getByRole('button', { name: kind }))
+  const card = libraryCards(kind).find((label) => label.startsWith(`${name} by `) || label.startsWith(`${name}, `))
+  if (!card) throw new Error(`No ${kind.toLowerCase()} card for ${name}`)
+  await user.click(within(screen.getByRole('list', { name: kind })).getByRole('button', { name: card }))
 }
 
 export function goHome(user: AppHarness['user']): Promise<void> {

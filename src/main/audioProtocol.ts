@@ -2,7 +2,7 @@ import { createReadStream, statSync } from 'node:fs'
 import { extname } from 'node:path'
 import { Readable } from 'node:stream'
 import { protocol } from 'electron'
-import { readTrackArtwork } from './trackArtwork'
+import { readTrackArtwork } from './trackMetadata'
 
 // The sandboxed renderer can't read local files, so audio is streamed through this scheme.
 // URLs look like playlist-audio://track/<trackId>, or playlist-audio://artwork/<trackId> for the

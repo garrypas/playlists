@@ -3,6 +3,7 @@ import { basename, extname, join } from 'node:path'
 import initSqlJs from 'sql.js'
 import type { Database as SqlDatabase, SqlValue } from 'sql.js'
 import type { CreatePlaylistInput, Playlist, PlaylistTrack } from '../shared/playlist'
+import type { TrackTags } from './trackMetadata'
 
 const starterPlaylists = [
   { title: 'Late night drive', description: 'For the long way home.', gradient: 'sunset', icon: '◒' },
@@ -25,6 +26,7 @@ export class PlaylistDatabase {
     const store = new PlaylistDatabase(new SQL.Database(bytes), filePath)
     store.db.run('PRAGMA foreign_keys = ON')
     store.initializeSchema()
+    store.migrateSchema()
     store.removeOrphanedTracks()
     store.seedStarterPlaylists()
     store.persist()
@@ -39,8 +41,8 @@ export class PlaylistDatabase {
       ...playlist,
       tracks: this.query<PlaylistTrack>(
         `
-        SELECT id, file_path AS filePath, title, artist, album,
-          duration_seconds AS durationSeconds, position
+        SELECT id, file_path AS filePath, title, artist, album, album_artist AS albumArtist,
+          track_number AS trackNumber, disc_number AS discNumber, duration_seconds AS durationSeconds, position
         FROM playlist_tracks WHERE playlist_id = ? ORDER BY position, id
       `,
         [playlist.id],
@@ -69,18 +71,21 @@ export class PlaylistDatabase {
     return this.list()
   }
 
-  addAudioFiles(id: number, filePaths: string[]): Playlist[] {
+  // Adds files to the end of a playlist, using their tags where `tags` has them and the file name otherwise.
+  addAudioFiles(id: number, filePaths: string[], tags: Map<string, TrackTags> = new Map()): Playlist[] {
     const playlistId = this.requirePlaylist(id)
     this.db.run('BEGIN')
     try {
       for (const filePath of filePaths) {
-        const title = basename(filePath, extname(filePath)).trim() || 'Untitled track'
+        const song = songDetails(filePath, tags.get(filePath))
         this.run(
           `
-          INSERT OR IGNORE INTO playlist_tracks (playlist_id, file_path, title, position)
-          VALUES (?, ?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = ?))
+          INSERT OR IGNORE INTO playlist_tracks (playlist_id, file_path, title, artist, album, album_artist,
+            track_number, disc_number, duration_seconds, tags_read, position)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            (SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = ?))
         `,
-          [playlistId, filePath, title, playlistId],
+          [playlistId, filePath, ...song, tags.has(filePath) ? 1 : 0, playlistId],
         )
       }
       this.db.run('COMMIT')
@@ -100,8 +105,9 @@ export class PlaylistDatabase {
     if (this.getTrackFilePath(trackId) === undefined) throw new Error('Song not found.')
     this.run(
       `
-      INSERT OR IGNORE INTO playlist_tracks (playlist_id, file_path, title, artist, album, duration_seconds, position)
-      SELECT ?, file_path, title, artist, album, duration_seconds,
+      INSERT OR IGNORE INTO playlist_tracks (playlist_id, file_path, title, artist, album, album_artist,
+        track_number, disc_number, duration_seconds, tags_read, position)
+      SELECT ?, file_path, title, artist, album, album_artist, track_number, disc_number, duration_seconds, tags_read,
         (SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = ?)
       FROM playlist_tracks WHERE id = ?
     `,
@@ -109,6 +115,36 @@ export class PlaylistDatabase {
     )
     this.persist()
     return this.list()
+  }
+
+  /** Saved files whose tags haven't been read yet (added before tags were read, or unreadable last time). */
+  filesNeedingTags(): string[] {
+    return this.query<{ filePath: string }>(
+      'SELECT DISTINCT file_path AS filePath FROM playlist_tracks WHERE tags_read = 0 ORDER BY file_path',
+    ).map((row) => row.filePath)
+  }
+
+  // Updates every copy of each file with what its tags say.
+  saveTags(tags: Map<string, TrackTags>): void {
+    if (tags.size === 0) return
+    this.db.run('BEGIN')
+    try {
+      for (const [filePath, fileTags] of tags) {
+        this.run(
+          `
+          UPDATE playlist_tracks SET title = ?, artist = ?, album = ?, album_artist = ?, track_number = ?,
+            disc_number = ?, duration_seconds = ?, tags_read = 1
+          WHERE file_path = ?
+        `,
+          [...songDetails(filePath, fileTags), filePath],
+        )
+      }
+      this.db.run('COMMIT')
+    } catch (error) {
+      this.db.run('ROLLBACK')
+      throw error
+    }
+    this.persist()
   }
 
   removeTrack(playlistId: number, trackId: number): Playlist[] {
@@ -184,6 +220,20 @@ export class PlaylistDatabase {
     `)
   }
 
+  // Adds columns that newer versions need to databases created by older ones.
+  private migrateSchema(): void {
+    const columns = new Set(this.query<{ name: string }>('PRAGMA table_info(playlist_tracks)').map((row) => row.name))
+    const added: Record<string, string> = {
+      album_artist: "TEXT NOT NULL DEFAULT ''",
+      track_number: 'INTEGER',
+      disc_number: 'INTEGER',
+      tags_read: 'INTEGER NOT NULL DEFAULT 0',
+    }
+    for (const [name, definition] of Object.entries(added)) {
+      if (!columns.has(name)) this.run(`ALTER TABLE playlist_tracks ADD COLUMN ${name} ${definition}`)
+    }
+  }
+
   private query<T>(sql: string, parameters: SqlValue[] = []): T[] {
     const statement = this.db.prepare(sql)
     try {
@@ -255,6 +305,19 @@ export class PlaylistDatabase {
       throw error
     }
   }
+}
+
+// Title, artist, album, album artist, track, disc and duration, in that order, falling back to the file name.
+function songDetails(filePath: string, tags: TrackTags = {}): SqlValue[] {
+  return [
+    tags.title ?? (basename(filePath, extname(filePath)).trim() || 'Untitled track'),
+    tags.artist ?? 'Unknown artist',
+    tags.album ?? '',
+    tags.albumArtist ?? '',
+    tags.trackNumber ?? null,
+    tags.discNumber ?? null,
+    tags.durationSeconds ?? null,
+  ]
 }
 
 export async function openPlaylistDatabase(userDataPath: string): Promise<PlaylistDatabase> {

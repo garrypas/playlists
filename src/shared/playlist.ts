@@ -4,6 +4,10 @@ export interface PlaylistTrack {
   title: string
   artist: string
   album: string
+  /** The album's artist, from the tags; blank if the file doesn't say. Albums are grouped by this, else `artist`. */
+  albumArtist: string
+  trackNumber: number | null
+  discNumber: number | null
   durationSeconds: number | null
   position: number
 }

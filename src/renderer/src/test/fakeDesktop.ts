@@ -1,7 +1,17 @@
 import type { DesktopApi } from '../../../preload'
 import type { Playlist, PlaylistTrack } from '../../../shared/playlist'
 
-export type SongSpec = string | { title: string; artist?: string; album?: string }
+export type SongSpec =
+  | string
+  | {
+      title: string
+      artist?: string
+      album?: string
+      albumArtist?: string
+      trackNumber?: number | null
+      discNumber?: number | null
+      durationSeconds?: number | null
+    }
 
 export interface FakeDesktop {
   api: DesktopApi
@@ -26,10 +36,29 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
   const calls: string[] = []
 
   function track(spec: SongSpec, position: number, filePath?: string): PlaylistTrack {
-    const { title, artist = 'Unknown artist', album = '' } = typeof spec === 'string' ? { title: spec } : spec
+    const {
+      title,
+      artist = 'Unknown artist',
+      album = '',
+      albumArtist = '',
+      trackNumber = null,
+      discNumber = null,
+      durationSeconds = null,
+    } = typeof spec === 'string' ? { title: spec } : spec
     const id = nextTrackId++
     allTitles.set(id, title)
-    return { id, filePath: filePath ?? `/music/${title}.mp3`, title, artist, album, durationSeconds: null, position }
+    return {
+      id,
+      filePath: filePath ?? `/music/${title}.mp3`,
+      title,
+      artist,
+      album,
+      albumArtist,
+      trackNumber,
+      discNumber,
+      durationSeconds,
+      position,
+    }
   }
 
   let store: Playlist[] = playlists.map(({ title, songs = [] }) => ({

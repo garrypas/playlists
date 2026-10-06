@@ -22,9 +22,29 @@ import {
 } from 'lucide-react'
 import type { Playlist, PlaylistTrack } from '../../shared/playlist'
 import { ExploreView } from './ExploreView'
+import { LibraryView, type LibrarySource } from './LibraryView'
 import { NameDialog } from './NameDialog'
 import { TrackArt } from './TrackArt'
-import { coverColors, formatDuration, librarySongs, type LibrarySong } from './trackDisplay'
+import {
+  coverColors,
+  formatDuration,
+  libraryAlbums,
+  libraryArtists,
+  librarySongs,
+  type LibrarySong,
+} from './trackDisplay'
+
+/** Where playback is playing from: the open playlist, every song (Explore), or an album or artist (Your library). */
+type PlaySource = 'playlist' | 'explore' | LibrarySource
+
+// The songs a non-playlist source plays through, in order, from the library's songs.
+function librarySourceTracks(source: Exclude<PlaySource, 'playlist'>, songs: LibrarySong[]): LibrarySong[] {
+  if (source === 'explore') return songs
+  if (source.startsWith('album:')) return libraryAlbums(songs).find((album) => `album:${album.key}` === source)?.songs ?? []
+  return libraryArtists(songs).find((artist) => `artist:${artist.name.toLocaleLowerCase()}` === source)?.songs ?? []
+}
+
+const sourceLabels: Record<string, string> = { playlist: 'PLAYLIST', explore: 'EXPLORE', album: 'ALBUM', artist: 'ARTIST' }
 
 // Returns track ids in random order, with `firstId` (if given) kept at the front.
 function shuffledIds(tracks: PlaylistTrack[], firstId?: number): number[] {
@@ -64,9 +84,8 @@ function App() {
   // Announces reorders to screen readers.
   const [moveStatus, setMoveStatus] = useState('')
   const queueButtonRef = useRef<HTMLButtonElement>(null)
-  const [view, setView] = useState<'home' | 'explore'>('home')
-  // Where playback is playing from: the open playlist, or every song in Explore.
-  const [source, setSource] = useState<'playlist' | 'explore'>('playlist')
+  const [view, setView] = useState<'home' | 'explore' | 'library'>('home')
+  const [source, setSource] = useState<PlaySource>('playlist')
 
   useEffect(() => {
     void window.desktop.playlists
@@ -91,7 +110,9 @@ function App() {
   )
   const songs = useMemo(() => librarySongs(playlists), [playlists])
   // The songs playback moves through, in playlist order (`activeTrack` and the queue panel index into these).
-  const playingTracks = source === 'explore' ? songs : (selectedPlaylist?.tracks ?? [])
+  const tracksFor = (from: PlaySource): PlaylistTrack[] =>
+    from === 'playlist' ? (selectedPlaylist?.tracks ?? []) : librarySourceTracks(from, songs)
+  const playingTracks = tracksFor(source)
   const currentTrack: PlaylistTrack | undefined = playingTracks[activeTrack]
   const trackCount = selectedPlaylist?.tracks.length ?? 0
   // A drop position in a filtered list would be ambiguous, so reordering waits until the search is cleared.
@@ -234,10 +255,10 @@ function App() {
     setPlaying(true)
   }
 
-  // Plays a song picked from a (possibly filtered) song list: the open playlist's, or Explore's. Switching between
-  // them clears the queue. With shuffle on, it reshuffles starting from that song.
-  function playFrom(from: 'playlist' | 'explore', track: PlaylistTrack): void {
-    const tracks = from === 'explore' ? songs : (selectedPlaylist?.tracks ?? [])
+  // Plays a song picked from a (possibly filtered) song list: the open playlist's, Explore's, or an album's or artist's.
+  // Switching between them clears the queue. With shuffle on, it reshuffles starting from that song.
+  function playFrom(from: PlaySource, track: PlaylistTrack): void {
+    const tracks = tracksFor(from)
     const index = tracks.findIndex((item) => item.id === track.id)
     if (from === source) {
       playTrackNow(index)
@@ -253,15 +274,24 @@ function App() {
     if (shuffleOrder) setShuffleOrder(shuffledIds(tracks, track.id))
   }
 
-  // Saves a changed playlist list. While playing from Explore, its songs re-sort, so playback, the queue and the
-  // shuffle order follow their songs to their new places; if the playing song is gone, playback stops.
+  // Plays an album or artist from the start, or from a random song with shuffle on.
+  function playLibrary(from: LibrarySource, song?: LibrarySong): void {
+    const tracks = tracksFor(from)
+    const first = song ?? tracks[shuffleOrder ? Math.floor(Math.random() * tracks.length) : 0]
+    if (first) playFrom(from, first)
+  }
+
+  // Saves a changed playlist list. While playing from the library (Explore, an album or an artist), its songs re-sort,
+  // so playback, the queue and the shuffle order follow their songs to their new places; if the playing song is gone,
+  // playback stops.
   function applyPlaylists(updated: Playlist[]): void {
     setPlaylists(updated)
-    if (source !== 'explore') return
-    const next = librarySongs(updated)
-    const indexOf = (index: number): number => next.findIndex((song) => song.filePath === songs[index]?.filePath)
+    if (source === 'playlist') return
+    const next = librarySourceTracks(source, librarySongs(updated))
+    const indexOf = (index: number): number =>
+      next.findIndex((song) => song.filePath === playingTracks[index]?.filePath)
     const sameSong = (id: number): number[] => {
-      const filePath = songs.find((song) => song.id === id)?.filePath
+      const filePath = playingTracks.find((song) => song.id === id)?.filePath
       return next.filter((song) => song.filePath === filePath).map((song) => song.id)
     }
     const playingIndex = indexOf(activeTrack)
@@ -337,7 +367,7 @@ function App() {
       const updated = await window.desktop.playlists.remove(selectedPlaylist.id)
       setSelectedPlaylistId(updated[0]?.id ?? null)
       // Playback from Explore carries on unless its song was only in the deleted playlist.
-      if (source === 'explore') return applyPlaylists(updated)
+      if (source !== 'playlist') return applyPlaylists(updated)
       setPlaylists(updated)
       setActiveTrack(0)
       setQueue([])
@@ -362,7 +392,7 @@ function App() {
     try {
       const removedIndex = selectedPlaylist.tracks.findIndex((track) => track.id === trackId)
       const updated = await window.desktop.playlists.removeTrack(selectedPlaylist.id, trackId)
-      if (source === 'explore') return applyPlaylists(updated)
+      if (source !== 'playlist') return applyPlaylists(updated)
       setPlaylists(updated)
       setQueue(queue.filter((id) => id !== trackId))
       if (resumeFrom !== null) {
@@ -392,7 +422,7 @@ function App() {
       const updated = await window.desktop.playlists.moveTrack(selectedPlaylist.id, trackId, toIndex)
       const reordered = updated.find((playlist) => playlist.id === selectedPlaylist.id)?.tracks ?? []
       const indexOf = (id: number | undefined): number => reordered.findIndex((item) => item.id === id)
-      if (source === 'explore') {
+      if (source !== 'playlist') {
         applyPlaylists(updated)
       } else {
         setPlaylists(updated)
@@ -526,7 +556,11 @@ function App() {
           >
             <Search size={17} /> Explore
           </button>
-          <button className="nav-item">
+          <button
+            className={`nav-item ${view === 'library' ? 'active' : ''}`}
+            aria-current={view === 'library' ? 'page' : undefined}
+            onClick={() => setView('library')}
+          >
             <Library size={17} /> Your library
           </button>
         </div>
@@ -567,9 +601,11 @@ function App() {
       <section className="main-panel">
         <header className="topbar">
           <div className="breadcrumbs">
-            <span>{view === 'explore' ? 'Explore' : 'Home'}</span>
+            <span>{{ home: 'Home', explore: 'Explore', library: 'Your library' }[view]}</span>
             <span className="crumb-divider">/</span>
-            <strong>{view === 'explore' ? 'All songs' : (selectedPlaylist?.title ?? 'Your playlists')}</strong>
+            <strong>
+              {{ home: selectedPlaylist?.title ?? 'Your playlists', explore: 'All songs', library: 'Albums & artists' }[view]}
+            </strong>
           </div>
           <div className="topbar-actions">
             <button className="icon-button" aria-label="Settings" title="Settings">
@@ -579,7 +615,17 @@ function App() {
           </div>
         </header>
         <div className="content-scroll">
-          {view === 'explore' ? (
+          {view === 'library' ? (
+            <LibraryView
+              songs={songs}
+              playlists={playlists}
+              currentFilePath={currentTrack?.filePath}
+              playing={playing}
+              onPlay={playLibrary}
+              onTogglePlaying={() => setPlaying(!playing)}
+              onAddToPlaylist={addToPlaylist}
+            />
+          ) : view === 'explore' ? (
             <ExploreView
               songs={songs}
               playlists={playlists}
@@ -979,7 +1025,7 @@ function App() {
               </>
             )}
             <p className="eyebrow">
-              NEXT FROM {source === 'explore' ? 'EXPLORE' : 'PLAYLIST'}
+              NEXT FROM {sourceLabels[source.split(':')[0]]}
               {shuffleOrder ? ' · SHUFFLED' : ''}
             </p>
             {upNext.length ? (
