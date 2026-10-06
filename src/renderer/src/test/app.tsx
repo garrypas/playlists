@@ -109,6 +109,25 @@ export function openPlaylist(user: AppHarness['user'], title: string): Promise<v
   return user.click(screen.getAllByRole('button', { name: new RegExp(title) })[0])
 }
 
+export function openExplore(user: AppHarness['user']): Promise<void> {
+  return user.click(screen.getByRole('button', { name: 'Explore' }))
+}
+
+export function goHome(user: AppHarness['user']): Promise<void> {
+  return user.click(screen.getByRole('button', { name: 'Home' }))
+}
+
+/** A song's row in the visible song list, for reading what it shows or finding its buttons. */
+export function songRow(title: string): HTMLElement {
+  return songButton(title).parentElement!
+}
+
+/** Opens a song's "Add to playlist" menu in Explore and returns it. */
+export async function openAddToPlaylistMenu(user: AppHarness['user'], title: string): Promise<HTMLElement> {
+  await user.click(screen.getByRole('button', { name: `Add ${title} to a playlist` }))
+  return screen.getByRole('group', { name: `Add ${title} to` })
+}
+
 export function queuePanel(): HTMLElement | null {
   return screen.queryByRole('region', { name: 'Queue' })
 }

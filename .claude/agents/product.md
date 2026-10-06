@@ -18,6 +18,10 @@ You own product decisions for **goodsongs**, a desktop app (Electron + React, ma
 - **Songs:** added only via the native file picker; removed per row. The search box filters by title/artist/album.
 - **Reordering:** drag a song row up or down; a line shows where it will land, and the new order is saved on drop (dropping it where it started does nothing). Keyboard users focus a song's grip handle ("Move <song>") and press ↑/↓ to move it one place; screen readers hear the new position. Reordering is off while a search filters the list, and in playlists with fewer than two songs. The playing song keeps playing and continues from its new place; the queue and a shuffled order are unchanged. If saving fails, an alert shows and the old order stays.
 - **Artwork:** song thumbnails (list, queue panel, player bar) show the cover embedded in the file (JPEG/PNG/GIF/WebP/BMP), read live rather than stored. With no art, an unreadable file or a missing file, they show the coloured disc icon; there's no broken-image flash. Hovering a song-list thumbnail shows a play icon, and clicking it plays that song (same as clicking its number). On the current song it shows pause/play and toggles playback instead of restarting. Playlist covers still use the gradient and symbol.
+- **Explore:** the Explore nav item opens one list of every song across all playlists, shown once per file however many playlists it's in. It's sorted by artist, album, then title, and each row shows which playlists the song is in. Search covers title, artist and album; artist chips filter to one artist. With no songs at all, it explains that songs added to any playlist show up here. Home goes back to the open playlist, and picking a playlist in the sidebar opens it.
+  - Playing a song from Explore plays through the whole Explore list (Next, Previous, shuffle and song endings all follow it), and it keeps playing when you go back Home. The queue panel says "Next from Explore". Playing a song from a playlist switches back to that playlist, and switching either way clears the queue. "Add to queue" on a playlist row still works while Explore is playing.
+  - While Explore is playing, adding, removing or deleting elsewhere keeps the same song playing. If the playing song is removed from its last playlist, playback stops.
+  - "Add to playlist" (+) on each row opens a menu of playlists. Ones that already have the song are disabled and marked as added. Picking one saves the song to the end of that playlist and confirms "Added <song> to <playlist>." The menu closes on Esc (focus goes back to its button), a click outside, or a choice. If saving fails, an alert shows and nothing changes.
 - **Playback:** a custom `playlist-audio://` protocol streams only files saved in the database.
   - Play/pause, Next (wraps), and Previous (restarts if more than 3s in, else goes to the previous song).
   - When a song ends it moves to the next one, and stops after the last.
@@ -32,8 +36,9 @@ You own product decisions for **goodsongs**, a desktop app (Electron + React, ma
   - The queue clears when you switch or delete a playlist. A song removed from the playlist leaves the queue.
 
 ## Not built / placeholders (backlog candidates)
-- The volume control, Like (one global toggle that isn't saved), the Home/Explore/Library nav, the "Made for you / Your rotation / New finds" tabs, the Settings button, and the profile ("Jamie Parker") are visual only.
+- The volume control, Like (one global toggle that isn't saved), the "Your library" nav item, the "Made for you / Your rotation / New finds" tabs, the Settings button, and the profile ("Jamie Parker") are visual only.
 - Song durations often show `—:—`, since they aren't read from files or saved.
+- Explore has no "Add to queue" (the queue only holds songs from the list that's playing), no album grouping or album filter, and no way to remove a song from every playlist at once.
 - There's no cross-playlist queue, no reordering of the queue, no repeat mode, and no saving of playback state between launches.
 - Songs can't be dragged between playlists or reordered while the list is filtered.
 - There's no CI. Automated behavior tests (`npm test`) cover the shipped behavior above, but visual details (hover effects, layout) are unverified until the user runs `npm run dev`.
@@ -42,7 +47,7 @@ You own product decisions for **goodsongs**, a desktop app (Electron + React, ma
 - Security is non-negotiable:
   - Keep `contextIsolation`, renderer sandboxing and `nodeIntegration: false`.
   - The preload API stays minimal and typed, and IPC inputs are validated in main.
-  - File paths come only from native dialogs.
+  - File paths come only from native dialogs. Copying a song to another playlist sends the song's saved ID, never its path.
   - The app makes no popups or navigation and grants no permissions (camera, mic, etc.).
   - A strict CSP applies.
 - Features that need web access, arbitrary paths, or new permissions need explicit user sign-off.

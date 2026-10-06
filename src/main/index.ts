@@ -69,6 +69,9 @@ ipcMain.handle('playlists:rename', (_event, id: unknown, title: unknown) =>
   playlistDatabase.rename(requireId(id, 'playlist'), requireString(title, 'playlist name')),
 )
 ipcMain.handle('playlists:remove', (_event, id: unknown) => playlistDatabase.remove(requireId(id, 'playlist')))
+ipcMain.handle('playlists:add-track', (_event, playlistId: unknown, trackId: unknown) =>
+  playlistDatabase.addTrack(requireId(playlistId, 'playlist'), requireId(trackId, 'track')),
+)
 ipcMain.handle('playlists:remove-track', (_event, playlistId: unknown, trackId: unknown) =>
   playlistDatabase.removeTrack(requireId(playlistId, 'playlist'), requireId(trackId, 'track')),
 )

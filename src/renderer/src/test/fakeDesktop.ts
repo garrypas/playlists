@@ -93,6 +93,14 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
           }
           picked = []
         }),
+      addTrack: (playlistId, trackId) =>
+        call('playlists:add-track', () => {
+          const playlist = find(playlistId)
+          const song = store.flatMap((item) => item.tracks).find((item) => item.id === trackId)
+          if (!song) throw new Error('Song not found.')
+          if (playlist.tracks.some((item) => item.filePath === song.filePath)) return
+          playlist.tracks.push(track(song, playlist.tracks.length, song.filePath))
+        }),
       removeTrack: (playlistId, trackId) =>
         call('playlists:remove-track', () => {
           const playlist = find(playlistId)

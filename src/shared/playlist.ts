@@ -28,6 +28,7 @@ export interface PlaylistApi {
   rename(id: number, title: string): Promise<Playlist[]>
   remove(id: number): Promise<Playlist[]>
   addAudioFiles(id: number): Promise<Playlist[]>
+  addTrack(playlistId: number, trackId: number): Promise<Playlist[]>
   removeTrack(playlistId: number, trackId: number): Promise<Playlist[]>
   moveTrack(playlistId: number, trackId: number, toIndex: number): Promise<Playlist[]>
 }

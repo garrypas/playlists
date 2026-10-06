@@ -161,6 +161,41 @@ describe('songs', () => {
   })
 })
 
+describe('adding a saved song to another playlist', () => {
+  it('copies the song to the end of the other playlist and keeps it in the first', async () => {
+    const [first, second] = db.list()
+    db.addAudioFiles(first.id, ['/music/a.mp3'])
+    db.addAudioFiles(second.id, ['/music/b.mp3'])
+    const song = db.list()[0].tracks[0]
+    db.addTrack(second.id, song.id)
+    await reopen()
+    const [savedFirst, savedSecond] = db.list()
+    expect(savedFirst.tracks.map((track) => track.title)).toEqual(['a'])
+    expect(savedSecond.tracks.map((track) => track.title)).toEqual(['b', 'a'])
+    expect(savedSecond.tracks[1].filePath).toBe('/music/a.mp3')
+  })
+
+  it('does not add the song twice to a playlist that already has it', () => {
+    const [first, second] = db.list()
+    db.addAudioFiles(first.id, ['/music/a.mp3'])
+    db.addAudioFiles(second.id, ['/music/a.mp3'])
+    const song = db.list()[0].tracks[0]
+    expect(db.addTrack(second.id, song.id)[1].tracks).toHaveLength(1)
+  })
+
+  it('rejects a song that does not exist', () => {
+    const playlist = db.list()[0]
+    expect(() => db.addTrack(playlist.id, 9999)).toThrow('Song not found.')
+    expect(db.list()[0].tracks).toHaveLength(0)
+  })
+
+  it('rejects a playlist that does not exist', () => {
+    const playlist = db.list()[0]
+    const song = db.addAudioFiles(playlist.id, ['/music/a.mp3'])[0].tracks[0]
+    expect(() => db.addTrack(9999, song.id)).toThrow('Playlist not found.')
+  })
+})
+
 describe('reordering songs', () => {
   function songTitles(playlistIndex = 0): string[] {
     return db.list()[playlistIndex].tracks.map((track) => track.title)

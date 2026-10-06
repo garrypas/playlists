@@ -92,6 +92,25 @@ export class PlaylistDatabase {
     return this.list()
   }
 
+  // Copies a saved song (by its ID, never a path from the window) to the end of another playlist.
+  // A song already in that playlist isn't added twice.
+  addTrack(playlistId: number, trackId: number): Playlist[] {
+    this.requirePlaylist(playlistId)
+    if (!Number.isSafeInteger(trackId) || trackId < 1) throw new Error('Invalid track ID.')
+    if (this.getTrackFilePath(trackId) === undefined) throw new Error('Song not found.')
+    this.run(
+      `
+      INSERT OR IGNORE INTO playlist_tracks (playlist_id, file_path, title, artist, album, duration_seconds, position)
+      SELECT ?, file_path, title, artist, album, duration_seconds,
+        (SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = ?)
+      FROM playlist_tracks WHERE id = ?
+    `,
+      [playlistId, playlistId, trackId],
+    )
+    this.persist()
+    return this.list()
+  }
+
   removeTrack(playlistId: number, trackId: number): Playlist[] {
     this.requirePlaylist(playlistId)
     if (!Number.isSafeInteger(trackId) || trackId < 1) throw new Error('Invalid track ID.')

@@ -21,10 +21,10 @@ import {
   X,
 } from 'lucide-react'
 import type { Playlist, PlaylistTrack } from '../../shared/playlist'
+import { ExploreView } from './ExploreView'
 import { NameDialog } from './NameDialog'
 import { TrackArt } from './TrackArt'
-
-const coverColors = ['plum', 'amber', 'sky', 'rose', 'mint']
+import { coverColors, formatDuration, librarySongs, type LibrarySong } from './trackDisplay'
 
 // Returns track ids in random order, with `firstId` (if given) kept at the front.
 function shuffledIds(tracks: PlaylistTrack[], firstId?: number): number[] {
@@ -64,6 +64,9 @@ function App() {
   // Announces reorders to screen readers.
   const [moveStatus, setMoveStatus] = useState('')
   const queueButtonRef = useRef<HTMLButtonElement>(null)
+  const [view, setView] = useState<'home' | 'explore'>('home')
+  // Where playback is playing from: the open playlist, or every song in Explore.
+  const [source, setSource] = useState<'playlist' | 'explore'>('playlist')
 
   useEffect(() => {
     void window.desktop.playlists
@@ -86,7 +89,10 @@ function App() {
       ),
     [query, selectedPlaylist],
   )
-  const currentTrack = selectedPlaylist?.tracks[activeTrack]
+  const songs = useMemo(() => librarySongs(playlists), [playlists])
+  // The songs playback moves through, in playlist order (`activeTrack` and the queue panel index into these).
+  const playingTracks = source === 'explore' ? songs : (selectedPlaylist?.tracks ?? [])
+  const currentTrack: PlaylistTrack | undefined = playingTracks[activeTrack]
   const trackCount = selectedPlaylist?.tracks.length ?? 0
   // A drop position in a filtered list would be ambiguous, so reordering waits until the search is cleared.
   const canReorder = !query && trackCount > 1
@@ -137,7 +143,7 @@ function App() {
 
   // Track indices in the order they play: playlist order, or the shuffle order while shuffle is on.
   function playOrder(): number[] {
-    const tracks = selectedPlaylist?.tracks ?? []
+    const tracks = playingTracks
     if (!shuffleOrder) return tracks.map((_, index) => index)
     // Drop removed songs and put songs added since shuffling at the end.
     const ids = shuffleOrder.filter((id) => tracks.some((track) => track.id === id))
@@ -158,7 +164,7 @@ function App() {
   }
 
   function toggleShuffle(): void {
-    const tracks = selectedPlaylist?.tracks ?? []
+    const tracks = playingTracks
     setShuffleOrder(shuffleOrder ? null : shuffledIds(tracks, tracks[resumeFrom ?? activeTrack]?.id))
   }
 
@@ -172,7 +178,7 @@ function App() {
 
   // Moves to the next queued song, or else the next song in the playlist. Returns false if there's nothing left.
   function advance(wrap: boolean): boolean {
-    const tracks = selectedPlaylist?.tracks ?? []
+    const tracks = playingTracks
     const queuedIndex = queue.length ? tracks.findIndex((track) => track.id === queue[0]) : -1
     if (queuedIndex >= 0) {
       setQueue(queue.slice(1))
@@ -205,13 +211,15 @@ function App() {
     }
   }
 
-  function addToQueue(trackId: number): void {
-    setQueue([...queue, trackId])
+  // Queues the playing list's copy of the song (a playlist row can be queued while Explore is playing).
+  function addToQueue(track: PlaylistTrack): void {
+    const queued = playingTracks.find((item) => item.filePath === track.filePath)
+    if (queued) setQueue([...queue, queued.id])
   }
 
   // Plays a queued song now, dropping it and anything queued ahead of it.
   function playFromQueue(position: number): void {
-    const index = selectedPlaylist?.tracks.findIndex((track) => track.id === queue[position]) ?? -1
+    const index = playingTracks.findIndex((track) => track.id === queue[position])
     if (index < 0) return
     setQueue(queue.slice(position + 1))
     if (resumeFrom === null) setResumeFrom(activeTrack)
@@ -226,10 +234,52 @@ function App() {
     setPlaying(true)
   }
 
-  // Plays a song picked from the (possibly filtered) song list. With shuffle on, it reshuffles starting from that song.
-  function playFromList(track: PlaylistTrack, listIndex: number): void {
-    playTrackNow(selectedPlaylist?.tracks.findIndex((item) => item.id === track.id) ?? listIndex)
-    if (shuffleOrder) setShuffleOrder(shuffledIds(selectedPlaylist?.tracks ?? [], track.id))
+  // Plays a song picked from a (possibly filtered) song list: the open playlist's, or Explore's. Switching between
+  // them clears the queue. With shuffle on, it reshuffles starting from that song.
+  function playFrom(from: 'playlist' | 'explore', track: PlaylistTrack): void {
+    const tracks = from === 'explore' ? songs : (selectedPlaylist?.tracks ?? [])
+    const index = tracks.findIndex((item) => item.id === track.id)
+    if (from === source) {
+      playTrackNow(index)
+    } else {
+      setSource(from)
+      setQueue([])
+      setResumeFrom(null)
+      setActiveTrack(index)
+      setPlaying(true)
+      // The same copy of the song is already loaded, so it won't reload; restart it instead.
+      if (track.id === currentTrack?.id && audioRef.current) audioRef.current.currentTime = 0
+    }
+    if (shuffleOrder) setShuffleOrder(shuffledIds(tracks, track.id))
+  }
+
+  // Saves a changed playlist list. While playing from Explore, its songs re-sort, so playback, the queue and the
+  // shuffle order follow their songs to their new places; if the playing song is gone, playback stops.
+  function applyPlaylists(updated: Playlist[]): void {
+    setPlaylists(updated)
+    if (source !== 'explore') return
+    const next = librarySongs(updated)
+    const indexOf = (index: number): number => next.findIndex((song) => song.filePath === songs[index]?.filePath)
+    const sameSong = (id: number): number[] => {
+      const filePath = songs.find((song) => song.id === id)?.filePath
+      return next.filter((song) => song.filePath === filePath).map((song) => song.id)
+    }
+    const playingIndex = indexOf(activeTrack)
+    setActiveTrack(Math.max(0, playingIndex))
+    if (playingIndex < 0) setPlaying(false)
+    if (resumeFrom !== null) setResumeFrom(playingIndex >= 0 && indexOf(resumeFrom) >= 0 ? indexOf(resumeFrom) : null)
+    setQueue(queue.flatMap(sameSong))
+    if (shuffleOrder) setShuffleOrder(shuffleOrder.flatMap(sameSong))
+  }
+
+  async function addToPlaylist(song: LibrarySong, playlistId: number): Promise<boolean> {
+    try {
+      applyPlaylists(await window.desktop.playlists.addTrack(playlistId, song.id))
+      return true
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Could not add the song to the playlist.')
+      return false
+    }
   }
 
   function seekTo(seconds: number): void {
@@ -269,7 +319,8 @@ function App() {
     const updated = await window.desktop.playlists.create({ title })
     setPlaylists(updated)
     setSelectedPlaylistId(updated[updated.length - 1]?.id ?? null)
-    setActiveTrack(0)
+    if (source === 'playlist') setActiveTrack(0)
+    setView('home')
     setNameDialog(null)
   }
 
@@ -284,8 +335,10 @@ function App() {
     if (!selectedPlaylist || !window.confirm(`Delete “${selectedPlaylist.title}” and its saved songs?`)) return
     try {
       const updated = await window.desktop.playlists.remove(selectedPlaylist.id)
-      setPlaylists(updated)
       setSelectedPlaylistId(updated[0]?.id ?? null)
+      // Playback from Explore carries on unless its song was only in the deleted playlist.
+      if (source === 'explore') return applyPlaylists(updated)
+      setPlaylists(updated)
       setActiveTrack(0)
       setQueue([])
       setResumeFrom(null)
@@ -298,8 +351,7 @@ function App() {
   async function addAudioFiles(): Promise<void> {
     if (!selectedPlaylist) return
     try {
-      const updated = await window.desktop.playlists.addAudioFiles(selectedPlaylist.id)
-      setPlaylists(updated)
+      applyPlaylists(await window.desktop.playlists.addAudioFiles(selectedPlaylist.id))
     } catch (error) {
       window.alert(error instanceof Error ? error.message : 'Could not add audio files.')
     }
@@ -309,7 +361,9 @@ function App() {
     if (!selectedPlaylist) return
     try {
       const removedIndex = selectedPlaylist.tracks.findIndex((track) => track.id === trackId)
-      setPlaylists(await window.desktop.playlists.removeTrack(selectedPlaylist.id, trackId))
+      const updated = await window.desktop.playlists.removeTrack(selectedPlaylist.id, trackId)
+      if (source === 'explore') return applyPlaylists(updated)
+      setPlaylists(updated)
       setQueue(queue.filter((id) => id !== trackId))
       if (resumeFrom !== null) {
         if (removedIndex === resumeFrom) setResumeFrom(null)
@@ -333,14 +387,18 @@ function App() {
     const { tracks } = selectedPlaylist
     const track = tracks.find((item) => item.id === trackId)
     if (!track || tracks.indexOf(track) === toIndex) return
-    const resumeId = resumeFrom === null ? undefined : tracks[resumeFrom]?.id
+    const resumeId = resumeFrom === null ? undefined : playingTracks[resumeFrom]?.id
     try {
       const updated = await window.desktop.playlists.moveTrack(selectedPlaylist.id, trackId, toIndex)
       const reordered = updated.find((playlist) => playlist.id === selectedPlaylist.id)?.tracks ?? []
       const indexOf = (id: number | undefined): number => reordered.findIndex((item) => item.id === id)
-      setPlaylists(updated)
-      if (currentTrack) setActiveTrack(Math.max(0, indexOf(currentTrack.id)))
-      if (resumeId !== undefined) setResumeFrom(indexOf(resumeId) >= 0 ? indexOf(resumeId) : null)
+      if (source === 'explore') {
+        applyPlaylists(updated)
+      } else {
+        setPlaylists(updated)
+        if (currentTrack) setActiveTrack(Math.max(0, indexOf(currentTrack.id)))
+        if (resumeId !== undefined) setResumeFrom(indexOf(resumeId) >= 0 ? indexOf(resumeId) : null)
+      }
       setMoveStatus(`Moved ${track.title} to position ${indexOf(trackId) + 1} of ${reordered.length}.`)
     } catch (error) {
       window.alert(error instanceof Error ? error.message : 'Could not move song.')
@@ -383,17 +441,14 @@ function App() {
 
   function selectPlaylist(playlist: Playlist): void {
     setSelectedPlaylistId(playlist.id)
+    setSource('playlist')
+    setView('home')
     setActiveTrack(0)
     setQueue([])
     setResumeFrom(null)
     if (shuffleOrder) setShuffleOrder(shuffledIds(playlist.tracks, playlist.tracks[0]?.id))
     setPlaying(false)
     setQuery('')
-  }
-
-  function formatDuration(seconds: number | null): string {
-    if (seconds === null) return '—:—'
-    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
   }
 
   const upNext = (() => {
@@ -403,7 +458,7 @@ function App() {
 
   // `position` is the song's place in the user queue, which can hold the same song more than once.
   function queueItem(index: number, kind: 'current' | 'queued' | 'playlist', position = 0): React.ReactNode {
-    const track = selectedPlaylist?.tracks[index]
+    const track = playingTracks[index]
     if (!track) return null
     const meta = (
       <>
@@ -457,10 +512,18 @@ function App() {
         </div>
         <div className="sidebar-section">
           <p className="eyebrow">YOUR SPACE</p>
-          <button className="nav-item active">
+          <button
+            className={`nav-item ${view === 'home' ? 'active' : ''}`}
+            aria-current={view === 'home' ? 'page' : undefined}
+            onClick={() => setView('home')}
+          >
             <Home size={17} /> Home
           </button>
-          <button className="nav-item">
+          <button
+            className={`nav-item ${view === 'explore' ? 'active' : ''}`}
+            aria-current={view === 'explore' ? 'page' : undefined}
+            onClick={() => setView('explore')}
+          >
             <Search size={17} /> Explore
           </button>
           <button className="nav-item">
@@ -483,7 +546,7 @@ function App() {
             <button
               key={playlist.id}
               onClick={() => selectPlaylist(playlist)}
-              className={`playlist-nav ${selectedPlaylist?.id === playlist.id ? 'chosen' : ''}`}
+              className={`playlist-nav ${view === 'home' && selectedPlaylist?.id === playlist.id ? 'chosen' : ''}`}
             >
               <span className={`mini-cover ${playlist.gradient}`}>{playlist.icon}</span>
               <span>{playlist.title}</span>
@@ -504,9 +567,9 @@ function App() {
       <section className="main-panel">
         <header className="topbar">
           <div className="breadcrumbs">
-            <span>Home</span>
+            <span>{view === 'explore' ? 'Explore' : 'Home'}</span>
             <span className="crumb-divider">/</span>
-            <strong>{selectedPlaylist?.title ?? 'Your playlists'}</strong>
+            <strong>{view === 'explore' ? 'All songs' : (selectedPlaylist?.title ?? 'Your playlists')}</strong>
           </div>
           <div className="topbar-actions">
             <button className="icon-button" aria-label="Settings" title="Settings">
@@ -516,223 +579,237 @@ function App() {
           </div>
         </header>
         <div className="content-scroll">
-          <section className="welcome-row">
-            <div>
-              <p className="eyebrow welcome-label">YOUR MUSIC, YOUR WAY</p>
-              <h1>
-                A little music
-                <br />
-                for the moment.
-              </h1>
-              <p className="welcome-copy">Your playlists stay saved on this device.</p>
-            </div>
-            <div className="welcome-art" aria-hidden="true">
-              <span className="sun-disc" />
-              <span className="art-hill hill-back" />
-              <span className="art-hill hill-front" />
-              <span className="art-grain" />
-            </div>
-          </section>
-
-          <section className="playlist-section">
-            <div className="section-title-row">
+          {view === 'explore' ? (
+            <ExploreView
+              songs={songs}
+              playlists={playlists}
+              currentFilePath={currentTrack?.filePath}
+              playing={playing}
+              onPlay={(song) => playFrom('explore', song)}
+              onTogglePlaying={() => setPlaying(!playing)}
+              onAddToPlaylist={addToPlaylist}
+            />
+          ) : (
+            <>
+            <section className="welcome-row">
               <div>
-                <p className="eyebrow">A GOOD PLACE TO START</p>
-                <h2>Your playlists</h2>
+                <p className="eyebrow welcome-label">YOUR MUSIC, YOUR WAY</p>
+                <h1>
+                  A little music
+                  <br />
+                  for the moment.
+                </h1>
+                <p className="welcome-copy">Your playlists stay saved on this device.</p>
               </div>
-              <button className="text-button" title="Create a new playlist" onClick={() => setNameDialog('create')}>
-                <Plus size={13} /> New playlist
-              </button>
-            </div>
-            <div className="playlist-grid">
-              {playlists.map((playlist, index) => (
-                <button
-                  key={playlist.id}
-                  className={`playlist-card ${selectedPlaylist?.id === playlist.id ? 'selected-card' : ''}`}
-                  onClick={() => selectPlaylist(playlist)}
-                >
-                  <span className={`playlist-art ${playlist.gradient}`}>
-                    <span className="art-symbol">{playlist.icon}</span>
-                    <span className="art-number">{String(index + 1).padStart(2, '0')}</span>
-                  </span>
-                  <span className="card-copy">
-                    <strong>{playlist.title}</strong>
-                    <span>
-                      {playlist.tracks.length} {playlist.tracks.length === 1 ? 'song' : 'songs'} ·{' '}
-                      {playlist.description}
-                    </span>
-                  </span>
-                </button>
-              ))}
-              {!loading && playlists.length === 0 && (
-                <p className="empty-state">Create a playlist to start collecting your music.</p>
-              )}
-            </div>
-          </section>
+              <div className="welcome-art" aria-hidden="true">
+                <span className="sun-disc" />
+                <span className="art-hill hill-back" />
+                <span className="art-hill hill-front" />
+                <span className="art-grain" />
+              </div>
+            </section>
 
-          <section className="tracks-section">
-            <div className="section-title-row track-heading">
-              <div>
-                <p className="eyebrow">SAVED ON THIS DEVICE</p>
-                <h2>{selectedPlaylist ? selectedPlaylist.title : 'Choose a playlist'}</h2>
-              </div>
-              <div className="playlist-actions">
-                <label className="search-field">
-                  <Search size={15} />
-                  <input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Find a song"
-                    aria-label="Find a song"
-                  />
-                </label>
-                <button
-                  className="small-action"
-                  title="Add audio files from this computer to the playlist"
-                  onClick={() => void addAudioFiles()}
-                  disabled={!selectedPlaylist}
-                >
-                  <Plus size={13} /> Add songs
-                </button>
-                <button
-                  className="small-action icon-action"
-                  title="Rename this playlist"
-                  onClick={() => setNameDialog('rename')}
-                  disabled={!selectedPlaylist}
-                >
-                  Rename
-                </button>
-                <button
-                  className="small-action icon-action danger-action"
-                  title="Delete this playlist"
-                  onClick={() => void deletePlaylist()}
-                  disabled={!selectedPlaylist}
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-            <div className="track-tabs">
-              {['Made for you', 'Your rotation', 'New finds'].map((name) => (
-                <button key={name} onClick={() => setTab(name)} className={tab === name ? 'tab-active' : ''}>
-                  {name}
-                </button>
-              ))}
-            </div>
-            <div className="track-table">
-              <div className="track-row table-head">
-                <span>#</span>
-                <span>TITLE</span>
-                <span>LOCATION</span>
-                <span>TIME</span>
-                <span />
-              </div>
-              {visibleTracks.map((track, index) => (
-                <div
-                  className={`track-row ${currentTrack?.id === track.id ? 'track-current' : ''} ${draggedTrackId === track.id ? 'track-dragging' : ''} ${dropLineClass(index)}`}
-                  key={track.id}
-                  draggable={canReorder}
-                  onDragStart={(event) => {
-                    if (!canReorder) return
-                    setDraggedTrackId(track.id)
-                    if (event.dataTransfer) {
-                      event.dataTransfer.effectAllowed = 'move'
-                      event.dataTransfer.setData('text/plain', track.title)
-                    }
-                  }}
-                  onDragOver={(event) => {
-                    if (draggedTrackId === null) return
-                    event.preventDefault()
-                    setDropSlot(dropSlotAt(event, index))
-                  }}
-                  onDrop={(event) => {
-                    if (draggedTrackId === null) return
-                    event.preventDefault()
-                    dropDraggedTrack(dropSlotAt(event, index))
-                  }}
-                  onDragEnd={endDrag}
-                >
-                  <button
-                    className="track-index track-play"
-                    aria-label={`Play ${track.title}`}
-                    title={`Play ${track.title}`}
-                    onClick={() => playFromList(track, index)}
-                  >
-                    {currentTrack?.id === track.id && playing ? (
-                      <AudioLines size={15} />
-                    ) : (
-                      String(index + 1).padStart(2, '0')
-                    )}
-                  </button>
-                  <span className="track-title-cell">
-                    <button
-                      className="track-art-button"
-                      tabIndex={-1}
-                      aria-hidden="true"
-                      title={currentTrack?.id === track.id && playing ? 'Pause' : `Play ${track.title}`}
-                      onClick={() =>
-                        currentTrack?.id === track.id ? setPlaying(!playing) : playFromList(track, index)
-                      }
-                    >
-                      <TrackArt trackId={track.id} color={coverColors[index % coverColors.length]} iconSize={19} />
-                      <span className="track-art-overlay">
-                        {currentTrack?.id === track.id && playing ? (
-                          <Pause size={15} fill="currentColor" />
-                        ) : (
-                          <Play size={15} fill="currentColor" />
-                        )}
-                      </span>
-                    </button>
-                    <span className="track-meta">
-                      <strong>{track.title}</strong>
-                      <span>{track.artist}</span>
-                    </span>
-                  </span>
-                  <span className="album-name">{track.album || 'Local audio file'}</span>
-                  <span className="track-duration">{formatDuration(track.durationSeconds)}</span>
-                  <span className="track-actions">
-                    <button
-                      className="track-move"
-                      aria-label={`Move ${track.title}`}
-                      title={query ? 'Clear the search to reorder songs' : 'Drag to reorder, or use the ↑ and ↓ keys'}
-                      disabled={!canReorder}
-                      onKeyDown={(event) => handleMoveKey(event, track.id, index)}
-                    >
-                      <GripVertical size={15} />
-                    </button>
-                    <button
-                      className="track-queue"
-                      aria-label={`Add ${track.title} to queue`}
-                      title="Add to queue"
-                      onClick={() => addToQueue(track.id)}
-                    >
-                      <ListPlus size={15} />
-                    </button>
-                    <button
-                      className="track-remove"
-                      aria-label={`Remove ${track.title} from playlist`}
-                      title="Remove from playlist"
-                      onClick={() => void removeTrack(track.id)}
-                    >
-                      <X size={15} />
-                    </button>
-                  </span>
+            <section className="playlist-section">
+              <div className="section-title-row">
+                <div>
+                  <p className="eyebrow">A GOOD PLACE TO START</p>
+                  <h2>Your playlists</h2>
                 </div>
-              ))}
-              <p className="visually-hidden" role="status">
-                {moveStatus}
-              </p>
-              {visibleTracks.length === 0 && (
-                <p className="empty-state">
-                  {query
-                    ? `No songs match “${query}”.`
-                    : selectedPlaylist
-                      ? 'This playlist is empty. Add songs from your music library to get started.'
-                      : 'Create a playlist to get started.'}
+                <button className="text-button" title="Create a new playlist" onClick={() => setNameDialog('create')}>
+                  <Plus size={13} /> New playlist
+                </button>
+              </div>
+              <div className="playlist-grid">
+                {playlists.map((playlist, index) => (
+                  <button
+                    key={playlist.id}
+                    className={`playlist-card ${selectedPlaylist?.id === playlist.id ? 'selected-card' : ''}`}
+                    onClick={() => selectPlaylist(playlist)}
+                  >
+                    <span className={`playlist-art ${playlist.gradient}`}>
+                      <span className="art-symbol">{playlist.icon}</span>
+                      <span className="art-number">{String(index + 1).padStart(2, '0')}</span>
+                    </span>
+                    <span className="card-copy">
+                      <strong>{playlist.title}</strong>
+                      <span>
+                        {playlist.tracks.length} {playlist.tracks.length === 1 ? 'song' : 'songs'} ·{' '}
+                        {playlist.description}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+                {!loading && playlists.length === 0 && (
+                  <p className="empty-state">Create a playlist to start collecting your music.</p>
+                )}
+              </div>
+            </section>
+
+            <section className="tracks-section">
+              <div className="section-title-row track-heading">
+                <div>
+                  <p className="eyebrow">SAVED ON THIS DEVICE</p>
+                  <h2>{selectedPlaylist ? selectedPlaylist.title : 'Choose a playlist'}</h2>
+                </div>
+                <div className="playlist-actions">
+                  <label className="search-field">
+                    <Search size={15} />
+                    <input
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder="Find a song"
+                      aria-label="Find a song"
+                    />
+                  </label>
+                  <button
+                    className="small-action"
+                    title="Add audio files from this computer to the playlist"
+                    onClick={() => void addAudioFiles()}
+                    disabled={!selectedPlaylist}
+                  >
+                    <Plus size={13} /> Add songs
+                  </button>
+                  <button
+                    className="small-action icon-action"
+                    title="Rename this playlist"
+                    onClick={() => setNameDialog('rename')}
+                    disabled={!selectedPlaylist}
+                  >
+                    Rename
+                  </button>
+                  <button
+                    className="small-action icon-action danger-action"
+                    title="Delete this playlist"
+                    onClick={() => void deletePlaylist()}
+                    disabled={!selectedPlaylist}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+              <div className="track-tabs">
+                {['Made for you', 'Your rotation', 'New finds'].map((name) => (
+                  <button key={name} onClick={() => setTab(name)} className={tab === name ? 'tab-active' : ''}>
+                    {name}
+                  </button>
+                ))}
+              </div>
+              <div className="track-table">
+                <div className="track-row table-head">
+                  <span>#</span>
+                  <span>TITLE</span>
+                  <span>LOCATION</span>
+                  <span>TIME</span>
+                  <span />
+                </div>
+                {visibleTracks.map((track, index) => (
+                  <div
+                    className={`track-row ${currentTrack?.filePath === track.filePath ? 'track-current' : ''} ${draggedTrackId === track.id ? 'track-dragging' : ''} ${dropLineClass(index)}`}
+                    key={track.id}
+                    draggable={canReorder}
+                    onDragStart={(event) => {
+                      if (!canReorder) return
+                      setDraggedTrackId(track.id)
+                      if (event.dataTransfer) {
+                        event.dataTransfer.effectAllowed = 'move'
+                        event.dataTransfer.setData('text/plain', track.title)
+                      }
+                    }}
+                    onDragOver={(event) => {
+                      if (draggedTrackId === null) return
+                      event.preventDefault()
+                      setDropSlot(dropSlotAt(event, index))
+                    }}
+                    onDrop={(event) => {
+                      if (draggedTrackId === null) return
+                      event.preventDefault()
+                      dropDraggedTrack(dropSlotAt(event, index))
+                    }}
+                    onDragEnd={endDrag}
+                  >
+                    <button
+                      className="track-index track-play"
+                      aria-label={`Play ${track.title}`}
+                      title={`Play ${track.title}`}
+                      onClick={() => playFrom('playlist', track)}
+                    >
+                      {currentTrack?.filePath === track.filePath && playing ? (
+                        <AudioLines size={15} />
+                      ) : (
+                        String(index + 1).padStart(2, '0')
+                      )}
+                    </button>
+                    <span className="track-title-cell">
+                      <button
+                        className="track-art-button"
+                        tabIndex={-1}
+                        aria-hidden="true"
+                        title={currentTrack?.filePath === track.filePath && playing ? 'Pause' : `Play ${track.title}`}
+                        onClick={() =>
+                          currentTrack?.filePath === track.filePath ? setPlaying(!playing) : playFrom('playlist', track)
+                        }
+                      >
+                        <TrackArt trackId={track.id} color={coverColors[index % coverColors.length]} iconSize={19} />
+                        <span className="track-art-overlay">
+                          {currentTrack?.filePath === track.filePath && playing ? (
+                            <Pause size={15} fill="currentColor" />
+                          ) : (
+                            <Play size={15} fill="currentColor" />
+                          )}
+                        </span>
+                      </button>
+                      <span className="track-meta">
+                        <strong>{track.title}</strong>
+                        <span>{track.artist}</span>
+                      </span>
+                    </span>
+                    <span className="album-name">{track.album || 'Local audio file'}</span>
+                    <span className="track-duration">{formatDuration(track.durationSeconds)}</span>
+                    <span className="track-actions">
+                      <button
+                        className="track-move"
+                        aria-label={`Move ${track.title}`}
+                        title={query ? 'Clear the search to reorder songs' : 'Drag to reorder, or use the ↑ and ↓ keys'}
+                        disabled={!canReorder}
+                        onKeyDown={(event) => handleMoveKey(event, track.id, index)}
+                      >
+                        <GripVertical size={15} />
+                      </button>
+                      <button
+                        className="track-queue"
+                        aria-label={`Add ${track.title} to queue`}
+                        title="Add to queue"
+                        onClick={() => addToQueue(track)}
+                      >
+                        <ListPlus size={15} />
+                      </button>
+                      <button
+                        className="track-remove"
+                        aria-label={`Remove ${track.title} from playlist`}
+                        title="Remove from playlist"
+                        onClick={() => void removeTrack(track.id)}
+                      >
+                        <X size={15} />
+                      </button>
+                    </span>
+                  </div>
+                ))}
+                <p className="visually-hidden" role="status">
+                  {moveStatus}
                 </p>
-              )}
-            </div>
-          </section>
+                {visibleTracks.length === 0 && (
+                  <p className="empty-state">
+                    {query
+                      ? `No songs match “${query}”.`
+                      : selectedPlaylist
+                        ? 'This playlist is empty. Add songs from your music library to get started.'
+                        : 'Create a playlist to get started.'}
+                  </p>
+                )}
+              </div>
+            </section>
+            </>
+          )}
           <footer className="page-footer">
             <span>Playlist data is stored locally on this device.</span>
             <span>GOODSONGS ®</span>
@@ -775,7 +852,7 @@ function App() {
               title={shuffleOrder ? 'Turn shuffle off' : 'Turn shuffle on'}
               aria-pressed={shuffleOrder !== null}
               onClick={toggleShuffle}
-              disabled={!trackCount}
+              disabled={!playingTracks.length}
             >
               <Shuffle size={16} />
             </button>
@@ -897,20 +974,19 @@ function App() {
                   </button>
                 </div>
                 {queue.map((trackId, position) =>
-                  queueItem(
-                    selectedPlaylist?.tracks.findIndex((track) => track.id === trackId) ?? -1,
-                    'queued',
-                    position,
-                  ),
+                  queueItem(playingTracks.findIndex((track) => track.id === trackId), 'queued', position),
                 )}
               </>
             )}
-            <p className="eyebrow">NEXT FROM PLAYLIST{shuffleOrder ? ' · SHUFFLED' : ''}</p>
+            <p className="eyebrow">
+              NEXT FROM {source === 'explore' ? 'EXPLORE' : 'PLAYLIST'}
+              {shuffleOrder ? ' · SHUFFLED' : ''}
+            </p>
             {upNext.length ? (
               upNext.map((index) => queueItem(index, 'playlist'))
             ) : (
               <p className="queue-empty">
-                {!trackCount
+                {!playingTracks.length
                   ? 'Add songs to this playlist to fill the queue.'
                   : queue.length
                     ? 'Playback stops after the queued songs.'

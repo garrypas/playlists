@@ -159,6 +159,24 @@ describe('playlist requests from the window', () => {
     await expect(invoke('playlists:remove-track', playlist.id, '7')).rejects.toThrow('Invalid track ID.')
   })
 
+  it('adds a saved song to another playlist', async () => {
+    const [first, second] = await invoke('playlists:list')
+    electron.openDialogResult = { canceled: false, filePaths: ['/music/Shared.mp3'] }
+    const song = (await invoke('playlists:add-audio-files', first.id))[0].tracks.find(
+      (track) => track.title === 'Shared',
+    )!
+    const updated = await invoke('playlists:add-track', second.id, song.id)
+    expect(updated[1].tracks.map((track) => track.filePath)).toContain('/music/Shared.mp3')
+  })
+
+  it.each([
+    ['/music/a.mp3', 1, 'Invalid playlist ID.'],
+    [1, '/music/a.mp3', 'Invalid track ID.'],
+    [1, 0, 'Invalid track ID.'],
+  ])('rejects adding to playlist %j the song %j', async (playlistId, trackId, message) => {
+    await expect(invoke('playlists:add-track', playlistId, trackId)).rejects.toThrow(message)
+  })
+
   it('moves a song within its playlist', async () => {
     const playlist = (await invoke('playlists:list'))[0]
     electron.openDialogResult = { canceled: false, filePaths: ['/music/Move A.mp3', '/music/Move B.mp3'] }
