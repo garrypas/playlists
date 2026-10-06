@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Source for build/icon.png (electron-builder makes the .icns and .ico from it). Matches the sidebar brand mark. -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#d0ed9a" />
+  <g fill="#252c1d" transform="translate(-20 0)">
+    <ellipse cx="392" cy="688" rx="94" ry="70" transform="rotate(-22 392 688)" />
+    <ellipse cx="672" cy="628" rx="94" ry="70" transform="rotate(-22 672 628)" />
+    <!-- Stems start inside the beam and end inside the note heads, so no corners poke out. -->
+    <rect x="436" y="360" width="44" height="300" />
+    <rect x="716" y="300" width="44" height="300" />
+    <polygon points="436,318 760,258 760,352 436,412" />
+  </g>
+</svg>

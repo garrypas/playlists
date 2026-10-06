@@ -25,6 +25,7 @@ This is a playlist app. It should allow users to create and modify playlists of 
 - `src/preload/` — typed, limited bridge between main and renderer
 - `src/renderer/` — React interface and presentation
 - `electron.vite.config.ts` — build configuration for the separate processes
+- `build/` — app icon (`icon.svg` source, `icon.png` used by electron-builder and in dev)
 - `.github/workflows/ci.yml` — GitHub Actions CI: typecheck, test and build on macOS and Windows for pushes to `main` and pull requests
 - `.github/workflows/release.yml` — on a `v*` tag, sets the app version from the tag, runs CI, then builds unsigned macOS (x64 + arm64) and Windows installers and publishes them as a GitHub release
 - `.claude/agents/product.md` — product agent: the source of truth for shipped behavior, backlog and product constraints

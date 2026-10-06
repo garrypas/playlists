@@ -9,6 +9,9 @@ registerAudioScheme()
 
 let playlistDatabase: PlaylistDatabase
 
+// Packaged apps get their icon from the bundle; in dev the app runs inside the stock Electron binary, so use ours.
+const devIcon = app.isPackaged ? undefined : join(__dirname, '../../build/icon.png')
+
 function createWindow(): void {
   const window = new BrowserWindow({
     width: 1240,
@@ -17,6 +20,7 @@ function createWindow(): void {
     minHeight: 620,
     backgroundColor: '#10100f',
     title: 'Playlists',
+    icon: devIcon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -102,6 +106,7 @@ app.on('web-contents-created', (_event, contents) => {
 })
 
 app.whenReady().then(async () => {
+  if (devIcon && process.platform === 'darwin') app.dock?.setIcon(devIcon)
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
   session.defaultSession.setPermissionCheckHandler(() => false)
 

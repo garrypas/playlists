@@ -1,5 +1,6 @@
 {
   "name": "playlists",
+  "productName": "Playlists",
   "version": "1.0.0",
   "description": "A cross-platform desktop playlist manager built with Electron, React, and TypeScript.",
   "main": "out/main/index.js",
@@ -48,9 +49,9 @@
   },
   "build": {
     "appId": "com.playlists.desktop",
-    "productName": "Playlists",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "out/**/*",

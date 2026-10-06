@@ -648,7 +648,7 @@ function App() {
             <AudioLines size={19} />
           </span>
           <span>
-            good<span className="brand-light">songs</span>
+            Play<span className="brand-light">lists</span>
           </span>
         </div>
         <div className="sidebar-section">
@@ -985,7 +985,7 @@ function App() {
           )}
           <footer className="page-footer">
             <span>Playlist data is stored locally on this device.</span>
-            <span>GOODSONGS ®</span>
+            <span>PLAYLISTS</span>
           </footer>
         </div>
       </section>
