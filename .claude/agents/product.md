@@ -34,6 +34,7 @@ You own product decisions for **goodsongs**, a desktop app (Electron + React, ma
   - When a song ends it moves to the next one, and stops after the last.
   - An unplayable file shows an alert and stops playback.
 - **Seek:** the progress bar is click/drag-able, with keyboard support (←/→ ±5s, Home/End).
+- **Volume:** the volume bar is click/drag-able, with keyboard support (←/↓ and →/↑ ±5%, Home silent, End full). The speaker button mutes and unmutes back to the previous level; unmuting from zero restores half volume, and changing the level unmutes. The level carries across songs and is remembered between launches (starting at full the first time); muting is not remembered.
 - **Shuffle:** a random order with the current song first. Songs added while shuffled go at the end in playlist order. Picking a song from the list reshuffles starting from it.
 - **Queue:**
   - The panel shows Now playing, Next in queue, and Next from playlist (with a shuffled label when relevant). It closes on Esc, a click outside, or ✕. The queue button shows a count badge.
@@ -44,13 +45,13 @@ You own product decisions for **goodsongs**, a desktop app (Electron + React, ma
 
 ## Not built / placeholders (backlog candidates)
 - Release installers (GitHub releases) are unsigned, so macOS Gatekeeper and Windows SmartScreen warn on first open; there are no automatic updates.
-- The volume control, Like (one global toggle that isn't saved), the "Made for you / Your rotation / New finds" tabs, and the Settings button are visual only.
+- Like (one global toggle that isn't saved), the "Made for you / Your rotation / New finds" tabs, and the Settings button are visual only.
 - Tags can't be edited in the app or re-read after a file changes. The first launch after upgrading reads every saved song's tags before the window opens, which may take a few seconds for a large collection.
 - Explore and Your library have no "Add to queue" (the queue only holds songs from the list that's playing), and no way to remove a song from every playlist at once. Explore has no album filter.
 - Your library has no search, no sort options (e.g. recently added) and no albums section on artist pages; it's songs-in-playlists only (no folder scanning).
 - There's no cross-playlist queue, no reordering of the queue, no repeat mode, and no saving of playback state between launches.
 - Songs can't be dragged between playlists (e.g. onto a sidebar playlist) or reordered while the list is filtered. Playlists can't be reordered from the Home grid, only the sidebar.
-- There's no CI. Automated behavior tests (`npm test`) cover the shipped behavior above, but visual details (hover effects, layout) are unverified until the user runs `npm run dev`.
+- Automated behavior tests (`npm test`, run in CI on macOS and Windows) cover the shipped behavior above, but visual details (hover effects, layout) are unverified until the user runs `npm run dev`.
 
 ## Constraints that shape product scope
 - Security is non-negotiable:

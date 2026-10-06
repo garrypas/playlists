@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react'
+import { cleanup, fireEvent, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import {
   expectPlaying,
@@ -11,6 +11,7 @@ import {
   songEnds,
   songFailsToLoad,
   songLoaded,
+  volumeLeftAt,
 } from './test/app'
 
 const songs = ['One', 'Two', 'Three', 'Four', 'Five']
@@ -235,5 +236,91 @@ describe('shuffle', () => {
     await openPlaylist(user, 'Other')
     expect(playerButton('Shuffle')).toHaveAttribute('aria-pressed', 'true')
     expect(player().song).toBe('A')
+  })
+})
+
+describe('volume', () => {
+  function volumeSlider(): HTMLElement {
+    return screen.getByRole('slider', { name: 'Volume' })
+  }
+
+  it('starts at full volume the first time', async () => {
+    await renderApp(library)
+    expect(player().volume).toBe(100)
+    expect(volumeSlider()).toHaveAttribute('aria-valuetext', '100%')
+  })
+
+  it.each([
+    ['ArrowLeft', 45],
+    ['ArrowDown', 45],
+    ['ArrowRight', 55],
+    ['ArrowUp', 55],
+    ['Home', 0],
+    ['End', 100],
+  ])('changes with %s', async (key, expected) => {
+    volumeLeftAt(50)
+    await renderApp(library)
+    fireEvent.keyDown(volumeSlider(), { key })
+    expect(player().volume).toBe(expected)
+    expect(volumeSlider()).toHaveAttribute('aria-valuetext', `${expected}%`)
+  })
+
+  it('does not go above full or below silent', async () => {
+    await renderApp(library)
+    fireEvent.keyDown(volumeSlider(), { key: 'ArrowUp' })
+    expect(player().volume).toBe(100)
+    fireEvent.keyDown(volumeSlider(), { key: 'Home' })
+    fireEvent.keyDown(volumeSlider(), { key: 'ArrowDown' })
+    expect(player().volume).toBe(0)
+  })
+
+  it('jumps to the point clicked on the bar', async () => {
+    await renderApp(library)
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ left: 100, width: 80 } as DOMRect)
+    fireEvent.pointerDown(volumeSlider(), { clientX: 120, pointerId: 1 })
+    expect(player().volume).toBe(25)
+  })
+
+  it('keeps its level when the next song plays', async () => {
+    volumeLeftAt(30)
+    const { user } = await renderApp(library)
+    await user.click(songButton('One'))
+    await user.click(playerButton('Next'))
+    expect(player()).toMatchObject({ song: 'Two', playing: true, volume: 30 })
+  })
+
+  it('mutes and unmutes back to the same level', async () => {
+    volumeLeftAt(40)
+    const { user } = await renderApp(library)
+    await user.click(screen.getByRole('button', { name: 'Mute' }))
+    expect(player().volume).toBe(0)
+    expect(volumeSlider()).toHaveAttribute('aria-valuetext', 'Muted')
+    await user.click(screen.getByRole('button', { name: 'Unmute' }))
+    expect(player().volume).toBe(40)
+  })
+
+  it('unmutes when the volume is changed', async () => {
+    volumeLeftAt(40)
+    const { user } = await renderApp(library)
+    await user.click(screen.getByRole('button', { name: 'Mute' }))
+    fireEvent.keyDown(volumeSlider(), { key: 'ArrowUp' })
+    expect(player().volume).toBe(5)
+    expect(screen.getByRole('button', { name: 'Mute' })).toBeInTheDocument()
+  })
+
+  it('comes back at half volume when unmuted from silent', async () => {
+    volumeLeftAt(0)
+    const { user } = await renderApp(library)
+    await user.click(screen.getByRole('button', { name: 'Unmute' }))
+    expect(player().volume).toBe(50)
+  })
+
+  it('remembers the level for next time, but not being muted', async () => {
+    const { user } = await renderApp(library)
+    fireEvent.keyDown(volumeSlider(), { key: 'ArrowDown' })
+    await user.click(screen.getByRole('button', { name: 'Mute' }))
+    cleanup()
+    await renderApp(library)
+    expect(player().volume).toBe(95)
   })
 })

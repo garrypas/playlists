@@ -139,6 +139,22 @@
   outline-offset: 2px;
 }
 
+.volume-hit {
+  padding: 6px 0;
+  cursor: pointer;
+  touch-action: none;
+  border-radius: 3px;
+}
+
+.volume-hit:hover .volume-track span {
+  background: #e9e9e2;
+}
+
+.volume-hit:focus-visible {
+  outline: 1px solid #d0ed9a;
+  outline-offset: 2px;
+}
+
 .name-dialog {
   width: min(340px, calc(100vw - 32px));
   padding: 20px;

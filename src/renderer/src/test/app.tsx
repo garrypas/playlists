@@ -29,10 +29,23 @@ function audio(): HTMLAudioElement {
   return document.querySelector('audio')!
 }
 
-/** What the speakers are playing: the loaded song's title, and whether it's playing or paused. */
-export function player(): { song: string | undefined; playing: boolean; time: number } {
+/**
+ * What the speakers are playing: the loaded song's title, whether it's playing or paused, and how loud it is
+ * (0–100, zero while muted).
+ */
+export function player(): { song: string | undefined; playing: boolean; time: number; volume: number } {
   const id = /^playlist-audio:\/\/track\/(\d+)$/.exec(audio().src)?.[1]
-  return { song: id ? current.titleOf(Number(id)) : undefined, playing: !audio().paused, time: audio().currentTime }
+  return {
+    song: id ? current.titleOf(Number(id)) : undefined,
+    playing: !audio().paused,
+    time: audio().currentTime,
+    volume: audio().muted ? 0 : Math.round(audio().volume * 100),
+  }
+}
+
+/** Renders the app as if it had been closed last time with the volume at `percent`. */
+export function volumeLeftAt(percent: number): void {
+  localStorage.setItem('volume', String(percent / 100))
 }
 
 export function expectPlaying(song: string): void {

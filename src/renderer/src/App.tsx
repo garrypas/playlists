@@ -16,7 +16,9 @@ import {
   SkipForward,
   Shuffle,
   SlidersHorizontal,
+  Volume1,
   Volume2,
+  VolumeX,
   X,
 } from 'lucide-react'
 import type { Playlist, PlaylistTrack } from '../../shared/playlist'
@@ -63,6 +65,18 @@ function shuffledIds(tracks: PlaylistTrack[], firstId?: number): number[] {
   return firstId === undefined ? ids : [firstId, ...ids]
 }
 
+const VOLUME_KEY = 'volume'
+
+// The volume from last time (0–1), or full volume if it was never set or can't be read.
+function savedVolume(): number {
+  try {
+    const value = Number(localStorage.getItem(VOLUME_KEY) ?? 1)
+    return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 1
+  } catch {
+    return 1
+  }
+}
+
 function App() {
   const [playlists, setPlaylists] = useState<Playlist[]>([])
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null)
@@ -76,6 +90,9 @@ function App() {
   const [duration, setDuration] = useState<number | null>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
   const progressTrackRef = useRef<HTMLDivElement>(null)
+  const [volume, setVolume] = useState(savedVolume)
+  const [muted, setMuted] = useState(false)
+  const volumeTrackRef = useRef<HTMLDivElement>(null)
   const [nameDialog, setNameDialog] = useState<'create' | 'rename' | null>(null)
   // Track ids in play order while shuffle is on; null when it's off.
   const [shuffleOrder, setShuffleOrder] = useState<number[] | null>(null)
@@ -124,6 +141,9 @@ function App() {
     from === 'playlist' ? (selectedPlaylist?.tracks ?? []) : librarySourceTracks(from, songs)
   const playingTracks = tracksFor(source)
   const currentTrack: PlaylistTrack | undefined = playingTracks[activeTrack]
+  // The volume as heard (0–100): zero while muted.
+  const audibleLevel = muted ? 0 : Math.round(volume * 100)
+  const audible = audibleLevel > 0
   const trackCount = selectedPlaylist?.tracks.length ?? 0
   // A drop position in a filtered list would be ambiguous, so reordering waits until the search is cleared.
   const canReorder = !query && trackCount > 1
@@ -145,6 +165,21 @@ function App() {
       window.removeEventListener('pointerdown', handlePointer)
     }
   }, [queueOpen])
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    audio.volume = volume
+    audio.muted = muted
+  }, [volume, muted])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(VOLUME_KEY, String(volume))
+    } catch {
+      // Not remembering the volume is fine.
+    }
+  }, [volume])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -334,6 +369,40 @@ function App() {
     if (!bar || !duration) return
     const { left, width } = bar.getBoundingClientRect()
     seekTo(((clientX - left) / width) * duration)
+  }
+
+  // Changing the volume also unmutes, like most players.
+  function changeVolume(level: number): void {
+    setVolume(Math.round(Math.min(1, Math.max(0, level)) * 100) / 100)
+    setMuted(false)
+  }
+
+  function volumeToPointer(clientX: number): void {
+    const bar = volumeTrackRef.current
+    if (!bar) return
+    const { left, width } = bar.getBoundingClientRect()
+    changeVolume((clientX - left) / width)
+  }
+
+  function handleVolumeKey(event: React.KeyboardEvent): void {
+    const level = muted ? 0 : volume
+    const target = {
+      ArrowLeft: level - 0.05,
+      ArrowDown: level - 0.05,
+      ArrowRight: level + 0.05,
+      ArrowUp: level + 0.05,
+      Home: 0,
+      End: 1,
+    }[event.key]
+    if (target === undefined) return
+    event.preventDefault()
+    changeVolume(target)
+  }
+
+  function toggleMute(): void {
+    // Unmuting at zero volume would still be silent, so bring it back to half.
+    if (muted || volume === 0) changeVolume(volume || 0.5)
+    else setMuted(true)
   }
 
   function handleSeekKey(event: React.KeyboardEvent): void {
@@ -1036,11 +1105,35 @@ function App() {
           </div>
         </div>
         <div className="player-volume">
-          <button className="icon-button control-muted" aria-label="Volume" title="Volume">
-            <Volume2 size={18} />
+          <button
+            className="icon-button control-muted"
+            aria-label={audible ? 'Mute' : 'Unmute'}
+            title={audible ? 'Mute' : 'Unmute'}
+            onClick={toggleMute}
+          >
+            {!audible ? <VolumeX size={18} /> : volume < 0.5 ? <Volume1 size={18} /> : <Volume2 size={18} />}
           </button>
-          <div className="volume-track">
-            <span />
+          <div
+            className="volume-hit"
+            role="slider"
+            tabIndex={0}
+            aria-label="Volume"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={audibleLevel}
+            aria-valuetext={muted ? 'Muted' : `${audibleLevel}%`}
+            onPointerDown={(event) => {
+              event.currentTarget.setPointerCapture(event.pointerId)
+              volumeToPointer(event.clientX)
+            }}
+            onPointerMove={(event) => {
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) volumeToPointer(event.clientX)
+            }}
+            onKeyDown={handleVolumeKey}
+          >
+            <div ref={volumeTrackRef} className="volume-track">
+              <span style={{ width: `${audibleLevel}%` }} />
+            </div>
           </div>
         </div>
         <audio
