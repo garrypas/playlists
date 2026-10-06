@@ -24,6 +24,7 @@ This is a playlist app. It should allow users to create and modify playlists of 
 - `src/preload/` — typed, limited bridge between main and renderer
 - `src/renderer/` — React interface and presentation
 - `electron.vite.config.ts` — build configuration for the separate processes
+- `.claude/agents/product.md` — product agent: the source of truth for shipped behavior, backlog and product constraints
 
 ## Coding guidelines
 
@@ -48,6 +49,11 @@ This is a playlist app. It should allow users to create and modify playlists of 
 1. <!-- Add any required planning or review steps -->
 2. Run `npm run typecheck` and `npm run build` before considering code changes complete.
 3. For UI changes, run `npm run dev` and check the change in the app.
+4. Keep the product agent (`.claude/agents/product.md`) current. When a change adds, alters or removes user-visible behavior, or the user states a new requirement or product decision, update it in the same task:
+   - Move shipped items from "Not built" to "Current behavior", describing behavior and edge cases, not implementation.
+   - Add new gaps or deferred ideas to "Not built".
+   - Add new constraints to "Constraints that shape product scope".
+   - Keep it concise: one bullet per feature, and edit existing bullets rather than appending duplicates.
 
 ## Product decisions and domain terms
 
