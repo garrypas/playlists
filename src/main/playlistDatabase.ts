@@ -94,6 +94,30 @@ export class PlaylistDatabase {
     return this.list()
   }
 
+  // Moves a song to `toIndex` in its playlist (clamped to the end) and renumbers every song's position.
+  moveTrack(playlistId: number, trackId: number, toIndex: number): Playlist[] {
+    this.requirePlaylist(playlistId)
+    if (!Number.isSafeInteger(trackId) || trackId < 1) throw new Error('Invalid track ID.')
+    if (!Number.isSafeInteger(toIndex) || toIndex < 0) throw new Error('Invalid song position.')
+    const ids = this.query<{ id: number }>(
+      'SELECT id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position, id', [playlistId],
+    ).map((row) => row.id)
+    const from = ids.indexOf(trackId)
+    if (from < 0) throw new Error('Song not found.')
+    ids.splice(from, 1)
+    ids.splice(Math.min(toIndex, ids.length), 0, trackId)
+    this.db.run('BEGIN')
+    try {
+      ids.forEach((id, position) => this.run('UPDATE playlist_tracks SET position = ? WHERE id = ?', [position, id]))
+      this.db.run('COMMIT')
+    } catch (error) {
+      this.db.run('ROLLBACK')
+      throw error
+    }
+    this.persist()
+    return this.list()
+  }
+
   getTrackFilePath(trackId: number): string | undefined {
     return this.query<{ filePath: string }>('SELECT file_path AS filePath FROM playlist_tracks WHERE id = ?', [trackId])[0]?.filePath
   }

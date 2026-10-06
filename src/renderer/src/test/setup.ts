@@ -28,7 +28,7 @@ Object.defineProperties(HTMLMediaElement.prototype, {
   load: { configurable: true, value(this: HTMLMediaElement) { Object.assign(state(this), { paused: true, currentTime: 0 }) } },
 })
 
-// jsdom doesn't implement modal dialogs, pointer events or pointer capture.
+// jsdom doesn't implement modal dialogs, pointer or drag events, or pointer capture.
 HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) { this.open = true }
 HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
   if (!this.open) return
@@ -43,6 +43,8 @@ class FakePointerEvent extends MouseEvent {
   }
 }
 window.PointerEvent ??= FakePointerEvent as unknown as typeof PointerEvent
+// jsdom has no drag events either; without this, drag events lose their pointer position.
+window.DragEvent ??= class extends MouseEvent {} as unknown as typeof DragEvent
 Element.prototype.setPointerCapture = function () {}
 Element.prototype.hasPointerCapture = function () { return false }
 

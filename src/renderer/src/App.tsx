@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AudioLines,
   Disc3,
+  GripVertical,
   Heart,
   Home,
   Library,
@@ -57,6 +58,11 @@ function App() {
   // While a queued song plays, the playlist track to carry on from afterwards.
   const [resumeFrom, setResumeFrom] = useState<number | null>(null)
   const queuePanelRef = useRef<HTMLElement>(null)
+  // The song being dragged to a new place, and the gap (0 = before the first song) it would drop into.
+  const [draggedTrackId, setDraggedTrackId] = useState<number | null>(null)
+  const [dropSlot, setDropSlot] = useState<number | null>(null)
+  // Announces reorders to screen readers.
+  const [moveStatus, setMoveStatus] = useState('')
   const queueButtonRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -74,6 +80,8 @@ function App() {
   ), [query, selectedPlaylist])
   const currentTrack = selectedPlaylist?.tracks[activeTrack]
   const trackCount = selectedPlaylist?.tracks.length ?? 0
+  // A drop position in a filtered list would be ambiguous, so reordering waits until the search is cleared.
+  const canReorder = !query && trackCount > 1
 
   // Close the queue on Escape or a click outside it (the queue button toggles it itself).
   useEffect(() => {
@@ -309,6 +317,60 @@ function App() {
     }
   }
 
+  // Moves a song to `toIndex` and saves the new order. Playback stays on the same songs, wherever they end up.
+  async function moveTrack(trackId: number, toIndex: number): Promise<void> {
+    if (!selectedPlaylist) return
+    const { tracks } = selectedPlaylist
+    const track = tracks.find((item) => item.id === trackId)
+    if (!track || tracks.indexOf(track) === toIndex) return
+    const resumeId = resumeFrom === null ? undefined : tracks[resumeFrom]?.id
+    try {
+      const updated = await window.desktop.playlists.moveTrack(selectedPlaylist.id, trackId, toIndex)
+      const reordered = updated.find((playlist) => playlist.id === selectedPlaylist.id)?.tracks ?? []
+      const indexOf = (id: number | undefined): number => reordered.findIndex((item) => item.id === id)
+      setPlaylists(updated)
+      if (currentTrack) setActiveTrack(Math.max(0, indexOf(currentTrack.id)))
+      if (resumeId !== undefined) setResumeFrom(indexOf(resumeId) >= 0 ? indexOf(resumeId) : null)
+      setMoveStatus(`Moved ${track.title} to position ${indexOf(trackId) + 1} of ${reordered.length}.`)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Could not move song.')
+    }
+  }
+
+  // The gap a song would drop into when dragged over the row at `index`: above it in its top half, else below it.
+  function dropSlotAt(event: React.DragEvent, index: number): number {
+    const { top, height } = event.currentTarget.getBoundingClientRect()
+    return event.clientY < top + height / 2 ? index : index + 1
+  }
+
+  function dropDraggedTrack(slot: number): void {
+    const from = selectedPlaylist?.tracks.findIndex((track) => track.id === draggedTrackId) ?? -1
+    if (draggedTrackId !== null && from >= 0) void moveTrack(draggedTrackId, slot > from ? slot - 1 : slot)
+    endDrag()
+  }
+
+  function endDrag(): void {
+    setDraggedTrackId(null)
+    setDropSlot(null)
+  }
+
+  function handleMoveKey(event: React.KeyboardEvent, trackId: number, index: number): void {
+    const step = ({ ArrowUp: -1, ArrowDown: 1 } as Record<string, number | undefined>)[event.key]
+    if (step === undefined) return
+    event.preventDefault()
+    const to = index + step
+    if (to >= 0 && to < trackCount) void moveTrack(trackId, to)
+  }
+
+  // Shows the drop line only where dropping would actually move the song.
+  function dropLineClass(index: number): string {
+    if (dropSlot === null || draggedTrackId === null) return ''
+    const from = selectedPlaylist?.tracks.findIndex((track) => track.id === draggedTrackId) ?? -1
+    if (dropSlot === from || dropSlot === from + 1) return ''
+    if (dropSlot === index) return 'drop-before'
+    return dropSlot === index + 1 && index === trackCount - 1 ? 'drop-after' : ''
+  }
+
   function selectPlaylist(playlist: Playlist): void {
     setSelectedPlaylistId(playlist.id)
     setActiveTrack(0)
@@ -389,11 +451,35 @@ function App() {
             </div></div>
             <div className="track-tabs">{['Made for you', 'Your rotation', 'New finds'].map((name) => <button key={name} onClick={() => setTab(name)} className={tab === name ? 'tab-active' : ''}>{name}</button>)}</div>
             <div className="track-table"><div className="track-row table-head"><span>#</span><span>TITLE</span><span>LOCATION</span><span>TIME</span><span /></div>
-              {visibleTracks.map((track, index) => <div className={`track-row ${currentTrack?.id === track.id ? 'track-current' : ''}`} key={track.id}>
+              {visibleTracks.map((track, index) => <div
+                className={`track-row ${currentTrack?.id === track.id ? 'track-current' : ''} ${draggedTrackId === track.id ? 'track-dragging' : ''} ${dropLineClass(index)}`}
+                key={track.id}
+                draggable={canReorder}
+                onDragStart={(event) => {
+                  if (!canReorder) return
+                  setDraggedTrackId(track.id)
+                  if (event.dataTransfer) {
+                    event.dataTransfer.effectAllowed = 'move'
+                    event.dataTransfer.setData('text/plain', track.title)
+                  }
+                }}
+                onDragOver={(event) => {
+                  if (draggedTrackId === null) return
+                  event.preventDefault()
+                  setDropSlot(dropSlotAt(event, index))
+                }}
+                onDrop={(event) => {
+                  if (draggedTrackId === null) return
+                  event.preventDefault()
+                  dropDraggedTrack(dropSlotAt(event, index))
+                }}
+                onDragEnd={endDrag}
+              >
                 <button className="track-index track-play" aria-label={`Play ${track.title}`} title={`Play ${track.title}`} onClick={() => playFromList(track, index)}>{currentTrack?.id === track.id && playing ? <AudioLines size={15} /> : String(index + 1).padStart(2, '0')}</button>
                 <span className="track-title-cell"><button className="track-art-button" tabIndex={-1} aria-hidden="true" title={currentTrack?.id === track.id && playing ? 'Pause' : `Play ${track.title}`} onClick={() => currentTrack?.id === track.id ? setPlaying(!playing) : playFromList(track, index)}><TrackArt trackId={track.id} color={coverColors[index % coverColors.length]} iconSize={19} /><span className="track-art-overlay">{currentTrack?.id === track.id && playing ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}</span></button><span className="track-meta"><strong>{track.title}</strong><span>{track.artist}</span></span></span>
-                <span className="album-name">{track.album || 'Local audio file'}</span><span className="track-duration">{formatDuration(track.durationSeconds)}</span><span className="track-actions"><button className="track-queue" aria-label={`Add ${track.title} to queue`} title="Add to queue" onClick={() => addToQueue(track.id)}><ListPlus size={15} /></button><button className="track-remove" aria-label={`Remove ${track.title} from playlist`} title="Remove from playlist" onClick={() => void removeTrack(track.id)}><X size={15} /></button></span>
+                <span className="album-name">{track.album || 'Local audio file'}</span><span className="track-duration">{formatDuration(track.durationSeconds)}</span><span className="track-actions"><button className="track-move" aria-label={`Move ${track.title}`} title={query ? 'Clear the search to reorder songs' : 'Drag to reorder, or use the ↑ and ↓ keys'} disabled={!canReorder} onKeyDown={(event) => handleMoveKey(event, track.id, index)}><GripVertical size={15} /></button><button className="track-queue" aria-label={`Add ${track.title} to queue`} title="Add to queue" onClick={() => addToQueue(track.id)}><ListPlus size={15} /></button><button className="track-remove" aria-label={`Remove ${track.title} from playlist`} title="Remove from playlist" onClick={() => void removeTrack(track.id)}><X size={15} /></button></span>
               </div>)}
+              <p className="visually-hidden" role="status">{moveStatus}</p>
               {visibleTracks.length === 0 && <p className="empty-state">{query ? `No songs match “${query}”.` : selectedPlaylist ? 'This playlist is empty. Add songs from your music library to get started.' : 'Create a playlist to get started.'}</p>}
             </div>
           </section>

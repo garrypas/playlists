@@ -16,6 +16,7 @@ const desktopApi = {
     remove: (id: number): Promise<Playlist[]> => ipcRenderer.invoke('playlists:remove', id),
     addAudioFiles: (id: number): Promise<Playlist[]> => ipcRenderer.invoke('playlists:add-audio-files', id),
     removeTrack: (playlistId: number, trackId: number): Promise<Playlist[]> => ipcRenderer.invoke('playlists:remove-track', playlistId, trackId),
+    moveTrack: (playlistId: number, trackId: number, toIndex: number): Promise<Playlist[]> => ipcRenderer.invoke('playlists:move-track', playlistId, trackId, toIndex),
   } satisfies PlaylistApi,
 }
 

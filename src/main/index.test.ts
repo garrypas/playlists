@@ -147,6 +147,19 @@ describe('playlist requests from the window', () => {
     await expect(invoke('playlists:remove-track', playlist.id, '7')).rejects.toThrow('Invalid track ID.')
   })
 
+  it('moves a song within its playlist', async () => {
+    const playlist = (await invoke('playlists:list'))[0]
+    electron.openDialogResult = { canceled: false, filePaths: ['/music/Move A.mp3', '/music/Move B.mp3'] }
+    const songA = (await invoke('playlists:add-audio-files', playlist.id))[0].tracks.find((track) => track.title === 'Move A')!
+    const tracks = (await invoke('playlists:move-track', playlist.id, songA.id, 99))[0].tracks
+    expect(tracks.at(-1)?.title).toBe('Move A')
+  })
+
+  it.each(['1', 1.5, -1, null, Number.MAX_SAFE_INTEGER + 1])('rejects the song position %j when moving a song', async (position) => {
+    const playlist = (await invoke('playlists:list'))[0]
+    await expect(invoke('playlists:move-track', playlist.id, 1, position)).rejects.toThrow('Invalid song position.')
+  })
+
   it('rejects a name that is not text when renaming', async () => {
     const playlist = (await invoke('playlists:list'))[0]
     await expect(invoke('playlists:rename', playlist.id, { name: 'x' })).rejects.toThrow('Invalid playlist name.')

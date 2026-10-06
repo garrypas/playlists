@@ -42,6 +42,11 @@ function requireId(value: unknown, label: string): number {
   return value
 }
 
+function requireIndex(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new Error('Invalid song position.')
+  return value
+}
+
 function requireString(value: unknown, label: string): string {
   if (typeof value !== 'string') throw new Error(`Invalid ${label}.`)
   return value
@@ -63,6 +68,8 @@ ipcMain.handle('playlists:rename', (_event, id: unknown, title: unknown) =>
 ipcMain.handle('playlists:remove', (_event, id: unknown) => playlistDatabase.remove(requireId(id, 'playlist')))
 ipcMain.handle('playlists:remove-track', (_event, playlistId: unknown, trackId: unknown) =>
   playlistDatabase.removeTrack(requireId(playlistId, 'playlist'), requireId(trackId, 'track')))
+ipcMain.handle('playlists:move-track', (_event, playlistId: unknown, trackId: unknown, toIndex: unknown) =>
+  playlistDatabase.moveTrack(requireId(playlistId, 'playlist'), requireId(trackId, 'track'), requireIndex(toIndex)))
 ipcMain.handle('playlists:add-audio-files', async (_event, id: unknown) => {
   const playlistId = requireId(id, 'playlist')
   const result = await dialog.showOpenDialog({

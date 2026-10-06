@@ -156,6 +156,60 @@ describe('songs', () => {
   })
 })
 
+describe('reordering songs', () => {
+  function songTitles(playlistIndex = 0): string[] {
+    return db.list()[playlistIndex].tracks.map((track) => track.title)
+  }
+
+  function addSongs(): { playlistId: number, idOf: (title: string) => number } {
+    const playlist = db.list()[0]
+    const tracks = db.addAudioFiles(playlist.id, ['/music/a.mp3', '/music/b.mp3', '/music/c.mp3', '/music/d.mp3'])[0].tracks
+    return { playlistId: playlist.id, idOf: (title) => tracks.find((track) => track.title === title)!.id }
+  }
+
+  it('moves a song down, returning the full list in the new order', () => {
+    const { playlistId, idOf } = addSongs()
+    const updated = db.moveTrack(playlistId, idOf('a'), 2)
+    expect(updated[0].tracks.map((track) => track.title)).toEqual(['b', 'c', 'a', 'd'])
+    expect(updated).toEqual(db.list())
+  })
+
+  it('moves a song up', () => {
+    const { playlistId, idOf } = addSongs()
+    db.moveTrack(playlistId, idOf('d'), 0)
+    expect(songTitles()).toEqual(['d', 'a', 'b', 'c'])
+  })
+
+  it('moves a song asked to go past the end to the end', () => {
+    const { playlistId, idOf } = addSongs()
+    db.moveTrack(playlistId, idOf('b'), 99)
+    expect(songTitles()).toEqual(['a', 'c', 'd', 'b'])
+  })
+
+  it('keeps the new order after the app restarts', async () => {
+    const { playlistId, idOf } = addSongs()
+    db.moveTrack(playlistId, idOf('c'), 0)
+    await reopen()
+    expect(songTitles()).toEqual(['c', 'a', 'b', 'd'])
+  })
+
+  it('still adds new songs at the end after a reorder', () => {
+    const { playlistId, idOf } = addSongs()
+    db.moveTrack(playlistId, idOf('d'), 0)
+    db.addAudioFiles(playlistId, ['/music/e.mp3'])
+    expect(songTitles()).toEqual(['d', 'a', 'b', 'c', 'e'])
+  })
+
+  it('does not move a song through a different playlist', () => {
+    const { idOf } = addSongs()
+    const other = db.list()[1]
+    db.addAudioFiles(other.id, ['/music/x.mp3'])
+    expect(() => db.moveTrack(other.id, idOf('a'), 0)).toThrow('Song not found.')
+    expect(songTitles()).toEqual(['a', 'b', 'c', 'd'])
+    expect(songTitles(1)).toEqual(['x'])
+  })
+})
+
 describe('saving', () => {
   it('keeps every change after the app restarts', async () => {
     const [first, second] = db.list()

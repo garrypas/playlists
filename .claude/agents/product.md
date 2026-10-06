@@ -16,6 +16,7 @@ You own product decisions for **goodsongs**, a desktop app (Electron + React, ma
 ## Current behavior (shipped)
 - **Playlists:** create and rename through an in-app name dialog, because Electron doesn't support `window.prompt` (1–100 chars, errors shown inline, an unchanged name is a no-op). Delete asks for confirmation and also removes the playlist's songs. Descriptions are trimmed and capped at 500 chars.
 - **Songs:** added only via the native file picker; removed per row. The search box filters by title/artist/album.
+- **Reordering:** drag a song row up or down; a line shows where it will land, and the new order is saved on drop (dropping it where it started does nothing). Keyboard users focus a song's grip handle ("Move <song>") and press ↑/↓ to move it one place; screen readers hear the new position. Reordering is off while a search filters the list, and in playlists with fewer than two songs. The playing song keeps playing and continues from its new place; the queue and a shuffled order are unchanged. If saving fails, an alert shows and the old order stays.
 - **Artwork:** song thumbnails (list, queue panel, player bar) show the cover embedded in the file (JPEG/PNG/GIF/WebP/BMP), read live rather than stored. With no art, an unreadable file or a missing file, they show the coloured disc icon; there's no broken-image flash. Hovering a song-list thumbnail shows a play icon, and clicking it plays that song (same as clicking its number). On the current song it shows pause/play and toggles playback instead of restarting. Playlist covers still use the gradient and symbol.
 - **Playback:** a custom `playlist-audio://` protocol streams only files saved in the database.
   - Play/pause, Next (wraps), and Previous (restarts if more than 3s in, else goes to the previous song).
@@ -33,7 +34,8 @@ You own product decisions for **goodsongs**, a desktop app (Electron + React, ma
 ## Not built / placeholders (backlog candidates)
 - The volume control, Like (one global toggle that isn't saved), the Home/Explore/Library nav, the "Made for you / Your rotation / New finds" tabs, the Settings button, and the profile ("Jamie Parker") are visual only.
 - Song durations often show `—:—`, since they aren't read from files or saved.
-- There's no cross-playlist queue, no reordering (queue or playlist), no repeat mode, and no saving of playback state between launches.
+- There's no cross-playlist queue, no reordering of the queue, no repeat mode, and no saving of playback state between launches.
+- Songs can't be dragged between playlists or reordered while the list is filtered.
 - There's no CI. Automated behavior tests (`npm test`) cover the shipped behavior above, but visual details (hover effects, layout) are unverified until the user runs `npm run dev`.
 
 ## Constraints that shape product scope

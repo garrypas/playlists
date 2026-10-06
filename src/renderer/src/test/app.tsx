@@ -69,6 +69,23 @@ export function songList(): string[] {
   return screen.queryAllByRole('button', { name: /^Play / }).map((button) => button.getAttribute('aria-label')!.slice(5))
 }
 
+/**
+ * Drags a song's row and drops it on the top or bottom half of another song's row, then waits for the move to save.
+ * jsdom has no layout, so each row is treated as 50px tall.
+ */
+export async function dragSong(title: string, onto: { above: string } | { below: string }): Promise<void> {
+  const row = (song: string): HTMLElement => songButton(song).closest<HTMLElement>('[draggable]')!
+  const target = row('above' in onto ? onto.above : onto.below)
+  target.getBoundingClientRect = () => DOMRect.fromRect({ x: 0, y: 0, width: 800, height: 50 })
+  const clientY = 'above' in onto ? 10 : 40
+  // Each event gets its own render, as in a real drag; then the move saves.
+  fireEvent.dragStart(row(title))
+  fireEvent.dragOver(target, { clientY })
+  fireEvent.drop(target, { clientY })
+  fireEvent.dragEnd(row(title))
+  await act(async () => {})
+}
+
 /** The song's artwork, which doubles as a mouse-only play/pause button (hidden from screen readers). */
 export function artworkButton(title: string): HTMLElement {
   return screen.getAllByRole('button', { hidden: true }).find((button) =>
