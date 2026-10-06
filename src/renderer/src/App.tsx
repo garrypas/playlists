@@ -8,7 +8,6 @@ import {
   Library,
   ListMusic,
   ListPlus,
-  MoreHorizontal,
   Pause,
   Play,
   Plus,
@@ -588,14 +587,6 @@ function App() {
           ))}
           {!loading && playlists.length === 0 && <p className="sidebar-empty">Create a playlist to get started.</p>}
         </div>
-        <div className="sidebar-bottom">
-          <div className="profile-avatar">J</div>
-          <div>
-            <strong>Jamie Parker</strong>
-            <span>Free account</span>
-          </div>
-          <MoreHorizontal size={18} className="profile-more" />
-        </div>
       </aside>
 
       <section className="main-panel">
@@ -611,7 +602,6 @@ function App() {
             <button className="icon-button" aria-label="Settings" title="Settings">
               <SlidersHorizontal size={17} />
             </button>
-            <div className="avatar-small">J</div>
           </div>
         </header>
         <div className="content-scroll">

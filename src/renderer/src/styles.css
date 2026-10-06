@@ -205,52 +205,6 @@ button {
   background: linear-gradient(145deg, #e2b5ae, #795164);
 }
 
-.sidebar-bottom {
-  margin-top: auto;
-  padding: 13px 5px 2px;
-  border-top: 1px solid var(--line);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.profile-avatar,
-.avatar-small {
-  display: grid;
-  place-items: center;
-  background: #9d7866;
-  color: #fff;
-  border-radius: 50%;
-  font-weight: 600;
-}
-
-.profile-avatar {
-  width: 31px;
-  height: 31px;
-  font-size: 12px;
-}
-
-.sidebar-bottom strong,
-.sidebar-bottom span {
-  display: block;
-}
-
-.sidebar-bottom strong {
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.sidebar-bottom span {
-  font-size: 10px;
-  color: var(--muted);
-  margin-top: 3px;
-}
-
-.profile-more {
-  margin-left: auto;
-  color: #8b8a82;
-}
-
 .main-panel {
   grid-column: 2;
   grid-row: 1;
@@ -290,12 +244,6 @@ button {
   display: flex;
   align-items: center;
   gap: 17px;
-}
-
-.avatar-small {
-  width: 27px;
-  height: 27px;
-  font-size: 11px;
 }
 
 .content-scroll {

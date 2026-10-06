@@ -26,6 +26,12 @@ describe('opening the app', () => {
     expect(screen.getByText(/1 song ·/)).toBeInTheDocument()
   })
 
+  it('has no user account: no profile, name or sign-in', async () => {
+    await renderApp(library)
+    expect(screen.queryByText(/account|profile|sign in|log in/i)).not.toBeInTheDocument()
+    expect(screen.queryByText('Jamie Parker')).not.toBeInTheDocument()
+  })
+
   it('invites the user to create a playlist when there are none', async () => {
     await renderApp([])
     expect(screen.getByText('Create a playlist to start collecting your music.')).toBeInTheDocument()

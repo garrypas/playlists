@@ -42,7 +42,7 @@ You own product decisions for **goodsongs**, a desktop app (Electron + React, ma
   - The queue clears when you switch or delete a playlist. A song removed from the playlist leaves the queue.
 
 ## Not built / placeholders (backlog candidates)
-- The volume control, Like (one global toggle that isn't saved), the "Made for you / Your rotation / New finds" tabs, the Settings button, and the profile ("Jamie Parker") are visual only.
+- The volume control, Like (one global toggle that isn't saved), the "Made for you / Your rotation / New finds" tabs, and the Settings button are visual only.
 - Tags can't be edited in the app or re-read after a file changes. The first launch after upgrading reads every saved song's tags before the window opens, which may take a few seconds for a large collection.
 - Explore and Your library have no "Add to queue" (the queue only holds songs from the list that's playing), and no way to remove a song from every playlist at once. Explore has no album filter.
 - Your library has no search, no sort options (e.g. recently added) and no albums section on artist pages; it's songs-in-playlists only (no folder scanning).
@@ -58,6 +58,7 @@ You own product decisions for **goodsongs**, a desktop app (Electron + React, ma
   - The app makes no popups or navigation and grants no permissions (camera, mic, etc.).
   - A strict CSP applies.
 - Features that need web access, arbitrary paths, or new permissions need explicit user sign-off.
+- No user accounts: it's a single-user desktop app, so there's no profile, sign-in or "my account" UI. Reject features that assume one.
 - Mutating actions return the full playlist list, and the renderer replaces its state with it.
 - Tags come from arbitrary files and are read only in the main process; the renderer never parses files.
 - Acceptance criteria must be user-observable and testable; they become the automated behavior tests.
