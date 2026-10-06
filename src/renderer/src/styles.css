@@ -874,3 +874,23 @@ button {
     grid-template-columns: 30px minmax(155px, 1.3fr) minmax(100px, 1fr) 45px 52px
   }
 }
+.album-thumb {
+  position: relative;
+  overflow: hidden
+}
+
+.album-thumb.has-artwork {
+  background: #262624
+}
+
+.album-thumb img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover
+}
+
+.album-thumb:not(.has-artwork) img {
+  visibility: hidden
+}

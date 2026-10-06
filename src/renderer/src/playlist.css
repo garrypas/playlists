@@ -330,3 +330,30 @@ button.queue-item:focus-visible {
 .queue-row .queue-item {
   min-width: 0
 }
+
+/* Song artwork doubles as a play button; the play/pause icon appears on hover. */
+.track-art-button {
+  position: relative;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  cursor: pointer
+}
+
+.track-art-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, .55);
+  color: #fff;
+  opacity: 0;
+  transition: opacity .12s
+}
+
+.track-art-button:hover .track-art-overlay {
+  opacity: 1
+}

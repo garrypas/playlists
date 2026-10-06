@@ -8,7 +8,7 @@ import react from '@vitejs/plugin-react'
 function contentSecurityPolicy(): Plugin {
   const shared = [
     "default-src 'self'",
-    "img-src 'self' data:",
+    "img-src 'self' data: playlist-audio:",
     "font-src 'self' https://fonts.gstatic.com",
     "media-src 'self' playlist-audio:",
     "object-src 'none'",
@@ -38,7 +38,8 @@ function contentSecurityPolicy(): Plugin {
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    // music-metadata is ESM-only, so it's bundled into the CommonJS main build rather than required at runtime.
+    plugins: [externalizeDepsPlugin({ exclude: ['music-metadata'] })],
   },
   preload: {
     plugins: [externalizeDepsPlugin()],

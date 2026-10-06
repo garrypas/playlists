@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import type { Playlist, PlaylistTrack } from '../../shared/playlist'
 import { NameDialog } from './NameDialog'
+import { TrackArt } from './TrackArt'
 
 const coverColors = ['plum', 'amber', 'sky', 'rose', 'mint']
 
@@ -209,6 +210,12 @@ function App() {
     setPlaying(true)
   }
 
+  // Plays a song picked from the (possibly filtered) song list. With shuffle on, it reshuffles starting from that song.
+  function playFromList(track: PlaylistTrack, listIndex: number): void {
+    playTrackNow(selectedPlaylist?.tracks.findIndex((item) => item.id === track.id) ?? listIndex)
+    if (shuffleOrder) setShuffleOrder(shuffledIds(selectedPlaylist?.tracks ?? [], track.id))
+  }
+
   function seekTo(seconds: number): void {
     const audio = audioRef.current
     if (!audio || !duration) return
@@ -326,7 +333,7 @@ function App() {
   function queueItem(index: number, kind: 'current' | 'queued' | 'playlist', position = 0): React.ReactNode {
     const track = selectedPlaylist?.tracks[index]
     if (!track) return null
-    const meta = <><span className={`album-thumb ${coverColors[index % coverColors.length]}`}><Disc3 size={17} /></span><span className="track-meta"><strong>{track.title}</strong><span>{track.artist}</span></span><span className="track-duration">{formatDuration(track.durationSeconds)}</span></>
+    const meta = <><TrackArt trackId={track.id} color={coverColors[index % coverColors.length]} iconSize={17} /><span className="track-meta"><strong>{track.title}</strong><span>{track.artist}</span></span><span className="track-duration">{formatDuration(track.durationSeconds)}</span></>
     if (kind === 'current') return <div key="current" className="queue-item queue-current">{meta}</div>
     if (kind === 'playlist') return <button key={track.id} className="queue-item" title={`Play ${track.title}`} onClick={() => playTrackNow(index)}>{meta}</button>
     return <div key={`queued-${position}`} className="queue-row">
@@ -383,8 +390,8 @@ function App() {
             <div className="track-tabs">{['Made for you', 'Your rotation', 'New finds'].map((name) => <button key={name} onClick={() => setTab(name)} className={tab === name ? 'tab-active' : ''}>{name}</button>)}</div>
             <div className="track-table"><div className="track-row table-head"><span>#</span><span>TITLE</span><span>LOCATION</span><span>TIME</span><span /></div>
               {visibleTracks.map((track, index) => <div className={`track-row ${currentTrack?.id === track.id ? 'track-current' : ''}`} key={track.id}>
-                <button className="track-index track-play" aria-label={`Play ${track.title}`} title={`Play ${track.title}`} onClick={() => { playTrackNow(selectedPlaylist?.tracks.findIndex((item) => item.id === track.id) ?? index); if (shuffleOrder) setShuffleOrder(shuffledIds(selectedPlaylist?.tracks ?? [], track.id)) }}>{currentTrack?.id === track.id && playing ? <AudioLines size={15} /> : String(index + 1).padStart(2, '0')}</button>
-                <span className="track-title-cell"><span className={`album-thumb ${coverColors[index % coverColors.length]}`}><Disc3 size={19} /></span><span className="track-meta"><strong>{track.title}</strong><span>{track.artist}</span></span></span>
+                <button className="track-index track-play" aria-label={`Play ${track.title}`} title={`Play ${track.title}`} onClick={() => playFromList(track, index)}>{currentTrack?.id === track.id && playing ? <AudioLines size={15} /> : String(index + 1).padStart(2, '0')}</button>
+                <span className="track-title-cell"><button className="track-art-button" tabIndex={-1} aria-hidden="true" title={currentTrack?.id === track.id && playing ? 'Pause' : `Play ${track.title}`} onClick={() => currentTrack?.id === track.id ? setPlaying(!playing) : playFromList(track, index)}><TrackArt trackId={track.id} color={coverColors[index % coverColors.length]} iconSize={19} /><span className="track-art-overlay">{currentTrack?.id === track.id && playing ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}</span></button><span className="track-meta"><strong>{track.title}</strong><span>{track.artist}</span></span></span>
                 <span className="album-name">{track.album || 'Local audio file'}</span><span className="track-duration">{formatDuration(track.durationSeconds)}</span><span className="track-actions"><button className="track-queue" aria-label={`Add ${track.title} to queue`} title="Add to queue" onClick={() => addToQueue(track.id)}><ListPlus size={15} /></button><button className="track-remove" aria-label={`Remove ${track.title} from playlist`} title="Remove from playlist" onClick={() => void removeTrack(track.id)}><X size={15} /></button></span>
               </div>)}
               {visibleTracks.length === 0 && <p className="empty-state">{query ? `No songs match “${query}”.` : selectedPlaylist ? 'This playlist is empty. Add songs from your music library to get started.' : 'Create a playlist to get started.'}</p>}
@@ -394,7 +401,7 @@ function App() {
         </div>
       </section>
 
-      <footer className="player-bar"><div className="now-playing"><span className={`album-thumb player-thumb ${coverColors[activeTrack % coverColors.length]}`}><Disc3 size={20} /></span><span className="track-meta"><strong>{currentTrack?.title ?? 'Nothing playing yet'}</strong><span>{currentTrack?.artist ?? 'Choose a song in your playlist'}</span></span><button className={`icon-button like-button ${liked ? 'liked' : ''}`} onClick={() => setLiked(!liked)} aria-label={liked ? 'Unlike song' : 'Like song'} title={liked ? 'Unlike song' : 'Like song'}><Heart size={17} fill={liked ? 'currentColor' : 'none'} /></button></div>
+      <footer className="player-bar"><div className="now-playing">{currentTrack ? <TrackArt trackId={currentTrack.id} color={coverColors[activeTrack % coverColors.length]} iconSize={20} className="player-thumb" /> : <span className={`album-thumb player-thumb ${coverColors[activeTrack % coverColors.length]}`}><Disc3 size={20} /></span>}<span className="track-meta"><strong>{currentTrack?.title ?? 'Nothing playing yet'}</strong><span>{currentTrack?.artist ?? 'Choose a song in your playlist'}</span></span><button className={`icon-button like-button ${liked ? 'liked' : ''}`} onClick={() => setLiked(!liked)} aria-label={liked ? 'Unlike song' : 'Like song'} title={liked ? 'Unlike song' : 'Like song'}><Heart size={17} fill={liked ? 'currentColor' : 'none'} /></button></div>
         <div className="player-controls"><div className="control-buttons"><button className={`icon-button control-muted ${shuffleOrder ? 'control-active' : ''}`} aria-label="Shuffle" title={shuffleOrder ? 'Turn shuffle off' : 'Turn shuffle on'} aria-pressed={shuffleOrder !== null} onClick={toggleShuffle} disabled={!trackCount}><Shuffle size={16} /></button><button className="icon-button control-muted" aria-label="Previous" title="Previous song (restarts the current song if more than 3 seconds in)" onClick={playPrevious} disabled={!currentTrack}><SkipBack size={18} fill="currentColor" /></button><button className="play-button" onClick={() => setPlaying(!playing)} aria-label={playing ? 'Pause' : 'Play'} title={playing ? 'Pause' : 'Play'} disabled={!currentTrack}>{playing ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><button className="icon-button control-muted" aria-label="Next" title="Next song" onClick={playNext} disabled={!currentTrack}><SkipForward size={18} fill="currentColor" /></button><button ref={queueButtonRef} className={`icon-button control-muted queue-button ${queueOpen ? 'control-active' : ''}`} aria-label={queue.length ? `Queue, ${queue.length} queued` : 'Queue'} title={queueOpen ? 'Hide queue' : 'Show queue'} aria-expanded={queueOpen} aria-controls="queue-panel" onClick={() => setQueueOpen(!queueOpen)}><ListMusic size={16} />{queue.length > 0 && <span className="queue-count" aria-hidden="true">{queue.length}</span>}</button></div><div className="progress-row"><span>{formatDuration(Math.floor(position))}</span><div
           className="progress-hit"
           role="slider"

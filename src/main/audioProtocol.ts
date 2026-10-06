@@ -2,9 +2,11 @@ import { createReadStream, statSync } from 'node:fs'
 import { extname } from 'node:path'
 import { Readable } from 'node:stream'
 import { protocol } from 'electron'
+import { readTrackArtwork } from './trackArtwork'
 
 // The sandboxed renderer can't read local files, so audio is streamed through this scheme.
-// URLs look like playlist-audio://track/<trackId>; only tracks saved in a playlist can be served.
+// URLs look like playlist-audio://track/<trackId>, or playlist-audio://artwork/<trackId> for the
+// cover embedded in that file. Only tracks saved in a playlist can be served.
 export const AUDIO_SCHEME = 'playlist-audio'
 
 const mimeTypes: Record<string, string> = {
@@ -29,9 +31,10 @@ export function handleAudioRequests(getTrackFilePath: (trackId: number) => strin
   protocol.handle(AUDIO_SCHEME, (request) => {
     const url = new URL(request.url)
     const trackId = Number(url.pathname.slice(1))
-    if (url.hostname !== 'track' || !Number.isSafeInteger(trackId) || trackId < 1) {
+    if ((url.hostname !== 'track' && url.hostname !== 'artwork') || !Number.isSafeInteger(trackId) || trackId < 1) {
       return new Response(null, { status: 400 })
     }
+    if (url.hostname === 'artwork') return artworkResponse(getTrackFilePath(trackId))
 
     const filePath = getTrackFilePath(trackId)
     let size: number
@@ -67,6 +70,20 @@ export function handleAudioRequests(getTrackFilePath: (trackId: number) => strin
       headers: { ...headers, 'Content-Length': String(end - start + 1), 'Content-Range': `bytes ${start}-${end}/${size}` },
     })
   })
+}
+
+// 404 means "no artwork"; the renderer shows its generic icon instead.
+async function artworkResponse(filePath: string | undefined): Promise<Response> {
+  try {
+    const artwork = filePath ? await readTrackArtwork(filePath) : undefined
+    if (!artwork) return new Response(null, { status: 404 })
+    return new Response(artwork.data.slice(), {
+      status: 200,
+      headers: { 'Content-Type': artwork.mimeType, 'Content-Length': String(artwork.data.length) },
+    })
+  } catch {
+    return new Response(null, { status: 404 })
+  }
 }
 
 function streamFile(filePath: string, start: number, end: number): ReadableStream {
