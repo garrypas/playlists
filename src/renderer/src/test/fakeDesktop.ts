@@ -11,6 +11,7 @@ export type SongSpec =
       trackNumber?: number | null
       discNumber?: number | null
       durationSeconds?: number | null
+      bpm?: number | null
     }
 
 export interface FakeDesktop {
@@ -21,6 +22,8 @@ export interface FakeDesktop {
   titleOf: (songId: number) => string | undefined
   /** Files the system file dialog will return next; empty means the user cancels. */
   pickFiles: (paths: string[]) => void
+  /** The main process finished detecting a song's tempo and tells the window (`bpm` undefined: no steady beat). */
+  tempoDetected: (songTitle: string, bpm: number | undefined) => void
   /** Makes the next call to the main process fail, the way Electron reports it. */
   failNext: (channel: string, message: string) => void
   calls: string[]
@@ -34,6 +37,7 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
   let picked: string[] = []
   let failure: { channel: string; message: string } | null = null
   const calls: string[] = []
+  const changeListeners = new Set<(playlists: Playlist[]) => void>()
 
   function track(spec: SongSpec, position: number, filePath?: string): PlaylistTrack {
     const {
@@ -44,6 +48,7 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
       trackNumber = null,
       discNumber = null,
       durationSeconds = null,
+      bpm = null,
     } = typeof spec === 'string' ? { title: spec } : spec
     const id = nextTrackId++
     allTitles.set(id, title)
@@ -57,6 +62,7 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
       trackNumber,
       discNumber,
       durationSeconds,
+      bpm,
       position,
     }
   }
@@ -151,6 +157,10 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
             item.position = position
           })
         }),
+      onChanged: (listener) => {
+        changeListeners.add(listener)
+        return () => changeListeners.delete(listener)
+      },
     },
   }
 
@@ -159,6 +169,12 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
     saved: () => structuredClone(store),
     idOf: (songTitle) => [...allTitles].find(([, title]) => title === songTitle)![0],
     titleOf: (songId) => allTitles.get(songId),
+    tempoDetected: (songTitle, bpm) => {
+      const tracks = store.flatMap((playlist) => playlist.tracks)
+      const filePath = tracks.find((item) => item.title === songTitle)!.filePath
+      for (const item of tracks) if (item.filePath === filePath) item.bpm = bpm ?? null
+      for (const listener of changeListeners) listener(structuredClone(store))
+    },
     pickFiles: (paths) => {
       picked = paths
     },

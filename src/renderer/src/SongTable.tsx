@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AudioLines, Check, Pause, Play, Plus } from 'lucide-react'
 import type { Playlist } from '../../shared/playlist'
 import { TrackArt } from './TrackArt'
-import { coverColors, formatDuration, type LibrarySong } from './trackDisplay'
+import { coverColors, formatBpm, formatDuration, type LibrarySong } from './trackDisplay'
 
 export interface SongTableProps {
   songs: LibrarySong[]
@@ -73,6 +73,7 @@ export function SongTable({
           <span>TITLE</span>
           <span>ALBUM</span>
           <span>IN PLAYLISTS</span>
+          <span>BPM</span>
           <span>TIME</span>
           <span />
         </div>
@@ -112,6 +113,7 @@ export function SongTable({
               </span>
               <span className="album-name">{song.album || 'Local audio file'}</span>
               <span className="album-name">{song.playlistIds.map(playlistTitle).join(', ')}</span>
+              <span className="track-bpm">{formatBpm(song.bpm)}</span>
               <span className="track-duration">{formatDuration(song.durationSeconds)}</span>
               <span className="track-actions explore-actions">
                 <button

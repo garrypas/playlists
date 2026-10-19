@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import type { CreatePlaylistInput, Playlist, PlaylistApi } from '../shared/playlist'
 
 export interface AppInfo {
@@ -22,6 +22,11 @@ const desktopApi = {
     moveTrack: (playlistId: number, trackId: number, toIndex: number): Promise<Playlist[]> =>
       ipcRenderer.invoke('playlists:move-track', playlistId, trackId, toIndex),
     move: (id: number, toIndex: number): Promise<Playlist[]> => ipcRenderer.invoke('playlists:move', id, toIndex),
+    onChanged: (listener: (playlists: Playlist[]) => void): (() => void) => {
+      const handler = (_event: IpcRendererEvent, playlists: Playlist[]): void => listener(playlists)
+      ipcRenderer.on('playlists:changed', handler)
+      return () => ipcRenderer.removeListener('playlists:changed', handler)
+    },
   } satisfies PlaylistApi,
 }
 

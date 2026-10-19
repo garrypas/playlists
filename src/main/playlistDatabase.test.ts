@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import initSqlJs from 'sql.js'
@@ -332,9 +332,61 @@ describe('song details from tags', () => {
     expect(db.list()[0]).toMatchObject({ title: 'Old favourites' })
     expect(db.list()[0].tracks[0]).toMatchObject({ title: 'old', albumArtist: '', trackNumber: null, discNumber: null })
     expect(db.filesNeedingTags()).toEqual(['/music/old.mp3'])
+    expect(db.list()[0].tracks[0].bpm).toBeNull()
+    expect(db.filesNeedingTempo()).toEqual(['/music/old.mp3'])
     // Playlists keep their creation order, and new ones go after them.
     db.create({ title: 'Newer' })
     expect(titles()).toEqual(['Old favourites', 'Newer'])
+  })
+})
+
+describe('song tempo', () => {
+  it('has no tempo until one is detected, then saves it on every copy of the file', async () => {
+    const [first, second] = db.list()
+    db.addAudioFiles(first.id, ['/music/a.mp3', '/music/b.mp3'])
+    db.addAudioFiles(second.id, ['/music/a.mp3'])
+    expect(db.list()[0].tracks.map((track) => track.bpm)).toEqual([null, null])
+    expect(db.filesNeedingTempo()).toEqual(['/music/a.mp3', '/music/b.mp3'])
+    db.saveTempo('/music/a.mp3', 124.5)
+    await reopen()
+    expect(db.list()[0].tracks.map((track) => track.bpm)).toEqual([124.5, null])
+    expect(db.list()[1].tracks[0].bpm).toBe(124.5)
+    expect(db.filesNeedingTempo()).toEqual(['/music/b.mp3'])
+  })
+
+  it('stops asking for the tempo of a song with no steady beat', () => {
+    const playlist = db.list()[0]
+    db.addAudioFiles(playlist.id, ['/music/ambient.mp3'])
+    db.saveTempo('/music/ambient.mp3', undefined)
+    expect(db.list()[0].tracks[0].bpm).toBeNull()
+    expect(db.filesNeedingTempo()).toEqual([])
+  })
+
+  it('tries again, once, for songs an older version found no tempo for', async () => {
+    db.close()
+    const SQL = await initSqlJs()
+    const old = new SQL.Database(readFileSync(join(userData, 'playlists.sqlite3')))
+    old.run(`
+      INSERT INTO playlist_tracks (playlist_id, file_path, title, position, bpm, tempo_read)
+        VALUES (1, '/music/long-intro.mp3', 'long intro', 0, NULL, 1), (1, '/music/found.mp3', 'found', 1, 128, 1);
+      DELETE FROM app_meta WHERE key = 'tempo_detector';
+    `)
+    writeFileSync(join(userData, 'playlists.sqlite3'), old.export())
+    db = await openPlaylistDatabase(userData)
+    expect(db.filesNeedingTempo()).toEqual(['/music/long-intro.mp3'])
+    db.saveTempo('/music/long-intro.mp3', undefined)
+    await reopen()
+    expect(db.filesNeedingTempo()).toEqual([])
+    expect(db.list()[0].tracks.map((track) => track.bpm)).toEqual([null, 128])
+  })
+
+  it('keeps the tempo when a song is added to another playlist, without detecting it again', () => {
+    const [first, second, third] = db.list()
+    const song = db.addAudioFiles(first.id, ['/music/a.mp3'])[0].tracks[0]
+    db.saveTempo('/music/a.mp3', 128)
+    expect(db.addTrack(second.id, song.id)[1].tracks[0].bpm).toBe(128)
+    expect(db.addAudioFiles(third.id, ['/music/a.mp3'])[2].tracks[0].bpm).toBe(128)
+    expect(db.filesNeedingTempo()).toEqual([])
   })
 })
 

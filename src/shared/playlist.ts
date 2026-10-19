@@ -9,6 +9,8 @@ export interface PlaylistTrack {
   trackNumber: number | null
   discNumber: number | null
   durationSeconds: number | null
+  /** Beats per minute, detected from the audio after the song is added; null until then or with no steady beat. */
+  bpm: number | null
   position: number
 }
 
@@ -37,4 +39,9 @@ export interface PlaylistApi {
   moveTrack(playlistId: number, trackId: number, toIndex: number): Promise<Playlist[]>
   /** Moves a playlist to `toIndex` in the list of playlists. */
   move(id: number, toIndex: number): Promise<Playlist[]>
+  /**
+   * Calls `listener` with the full playlist list whenever it changes in the background (e.g. a song's tempo is found).
+   * Returns a function that stops listening.
+   */
+  onChanged(listener: (playlists: Playlist[]) => void): () => void
 }

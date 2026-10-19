@@ -26,9 +26,11 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            target: --mac --x64 --arm64
+            target: --mac
+            archs: x64 arm64
           - os: windows-latest
-            target: --win --x64
+            target: --win
+            archs: x64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
@@ -50,8 +52,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The bundled ffmpeg (for tempo detection) is a native binary that npm installs for the runner's architecture
+      # only, so each architecture is packaged separately with its own binary.
       - name: Build installers
-        run: npm run build && npx electron-builder ${{ matrix.target }} --publish never
+        shell: bash
+        run: |
+          npm run build
+          for arch in ${{ matrix.archs }}; do
+            rm -f node_modules/ffmpeg-static/ffmpeg node_modules/ffmpeg-static/ffmpeg.exe
+            npm_config_arch=$arch node node_modules/ffmpeg-static/install.js
+            npx electron-builder ${{ matrix.target }} --$arch --publish never
+          done
 
       - uses: actions/upload-artifact@v4
         with:

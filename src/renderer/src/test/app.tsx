@@ -30,17 +30,32 @@ function audio(): HTMLAudioElement {
 }
 
 /**
- * What the speakers are playing: the loaded song's title, whether it's playing or paused, and how loud it is
- * (0–100, zero while muted).
+ * What the speakers are playing: the loaded song's title, whether it's playing or paused, how loud it is
+ * (0–100, zero while muted), how fast it's playing (percent of normal speed, e.g. 102.5), and whether a speed change
+ * keeps the pitch (false: pitch moves with speed, like a turntable).
  */
-export function player(): { song: string | undefined; playing: boolean; time: number; volume: number } {
+export function player(): {
+  song: string | undefined
+  playing: boolean
+  time: number
+  volume: number
+  speed: number
+  keepsPitch: boolean
+} {
   const id = /^playlist-audio:\/\/track\/(\d+)$/.exec(audio().src)?.[1]
   return {
     song: id ? current.titleOf(Number(id)) : undefined,
     playing: !audio().paused,
     time: audio().currentTime,
     volume: audio().muted ? 0 : Math.round(audio().volume * 100),
+    speed: Math.round(audio().playbackRate * 1000) / 10,
+    keepsPitch: audio().preservesPitch,
   }
+}
+
+/** The main process finished detecting a song's tempo in the background (`bpm` undefined: no steady beat). */
+export function tempoDetected(title: string, bpm: number | undefined): void {
+  act(() => current.tempoDetected(title, bpm))
 }
 
 /** Renders the app as if it had been closed last time with the volume at `percent`. */

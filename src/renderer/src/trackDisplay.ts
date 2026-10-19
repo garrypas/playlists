@@ -7,6 +7,11 @@ export function formatDuration(seconds: number | null): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 
+// A song's tempo as shown in song lists: whole beats per minute, or a dash until it's known.
+export function formatBpm(bpm: number | null): string {
+  return bpm === null ? '—' : String(Math.round(bpm))
+}
+
 /** A song as Explore shows it: one entry per file, however many playlists it's in. */
 export interface LibrarySong extends PlaylistTrack {
   playlistIds: number[]

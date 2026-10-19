@@ -33,6 +33,8 @@ You own product decisions for **Playlists**, a desktop app (Electron + React, ma
   - Play/pause, Next (wraps), and Previous (restarts if more than 3s in, else goes to the previous song).
   - When a song ends it moves to the next one, and stops after the last.
   - An unplayable file shows an alert and stops playback.
+- **BPM:** each song's tempo is detected from its audio in the background after it's added (one song at a time, a few seconds each; adding returns straight away). Song lists (playlist, Explore, album and artist pages) show it as whole BPM, with "—" until it's known or when the song has no steady beat. A file already in another playlist keeps its BPM rather than being analysed again. Missing or undecodable files stay "—" and are retried at the next launch, as are songs saved before BPM detection existed. Only the first 10 minutes of a song are analysed, and the beat must start within the first minute (long beatless intros are fine). When detection improves, songs it previously found no tempo for are retried once at the next launch.
+- **Tempo:** a slider above the volume speeds playback up or slows it down by up to ±10% while playing. Pitch moves with the speed, like a turntable (+10% is about 1.6 semitones higher), because Chromium's pitch-keeping time-stretch made music stutter. The middle is normal speed; click/drag-able, ←/→ (and ↑/↓) ±0.1%, Page Up/Down ±1%, Home/End −10%/+10%. The reset button or a double-click goes back to normal speed. The player shows the change (e.g. "+2.5%") and the playing song's BPM at that speed; screen readers hear both. The tempo stays the same across songs but isn't remembered between launches.
 - **Seek:** the progress bar is click/drag-able, with keyboard support (←/→ ±5s, Home/End).
 - **Volume:** the volume bar is click/drag-able, with keyboard support (←/↓ and →/↑ ±5%, Home silent, End full). The speaker button mutes and unmutes back to the previous level; unmuting from zero restores half volume, and changing the level unmutes. The level carries across songs and is remembered between launches (starting at full the first time); muting is not remembered.
 - **Shuffle:** a random order with the current song first. Songs added while shuffled go at the end in playlist order. Picking a song from the list reshuffles starting from it.
@@ -46,6 +48,7 @@ You own product decisions for **Playlists**, a desktop app (Electron + React, ma
 ## Not built / placeholders (backlog candidates)
 - Release installers (GitHub releases) are unsigned, so macOS Gatekeeper and Windows SmartScreen warn on first open; there are no automatic updates.
 - Like (one global toggle that isn't saved), the "Made for you / Your rotation / New finds" tabs, and the Settings button are visual only.
+- BPM can't be edited, corrected for half/double-time detections, sorted or filtered on, and isn't re-detected after a file changes. There's no beat-matching, sync or "key lock" (keeping pitch while changing tempo); a good one would need a proper time-stretch library such as SoundTouch, since Chromium's built-in one stutters.
 - Tags can't be edited in the app or re-read after a file changes. The first launch after upgrading reads every saved song's tags before the window opens, which may take a few seconds for a large collection.
 - Explore and Your library have no "Add to queue" (the queue only holds songs from the list that's playing), and no way to remove a song from every playlist at once. Explore has no album filter.
 - Your library has no search, no sort options (e.g. recently added) and no albums section on artist pages; it's songs-in-playlists only (no folder scanning).
@@ -64,4 +67,5 @@ You own product decisions for **Playlists**, a desktop app (Electron + React, ma
 - No user accounts: it's a single-user desktop app, so there's no profile, sign-in or "my account" UI. Reject features that assume one.
 - Mutating actions return the full playlist list, and the renderer replaces its state with it.
 - Tags come from arbitrary files and are read only in the main process; the renderer never parses files.
+- BPM detection decodes audio with an ffmpeg binary bundled in the app (GPL-licensed, tens of MB per platform) on a worker thread in the main process, so it adds to installer size and works offline. Results reach the window through a background "playlists changed" message carrying the full list.
 - Acceptance criteria must be user-observable and testable; they become the automated behavior tests.

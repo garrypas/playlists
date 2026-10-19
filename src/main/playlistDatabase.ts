@@ -27,6 +27,7 @@ export class PlaylistDatabase {
     store.db.run('PRAGMA foreign_keys = ON')
     store.initializeSchema()
     store.migrateSchema()
+    store.retryMissingTempos()
     store.removeOrphanedTracks()
     store.seedStarterPlaylists()
     store.persist()
@@ -42,7 +43,7 @@ export class PlaylistDatabase {
       tracks: this.query<PlaylistTrack>(
         `
         SELECT id, file_path AS filePath, title, artist, album, album_artist AS albumArtist,
-          track_number AS trackNumber, disc_number AS discNumber, duration_seconds AS durationSeconds, position
+          track_number AS trackNumber, disc_number AS discNumber, duration_seconds AS durationSeconds, bpm, position
         FROM playlist_tracks WHERE playlist_id = ? ORDER BY position, id
       `,
         [playlist.id],
@@ -72,6 +73,7 @@ export class PlaylistDatabase {
   }
 
   // Adds files to the end of a playlist, using their tags where `tags` has them and the file name otherwise.
+  // A file already saved in another playlist keeps the tempo found for it there.
   addAudioFiles(id: number, filePaths: string[], tags: Map<string, TrackTags> = new Map()): Playlist[] {
     const playlistId = this.requirePlaylist(id)
     this.db.run('BEGIN')
@@ -81,11 +83,13 @@ export class PlaylistDatabase {
         this.run(
           `
           INSERT OR IGNORE INTO playlist_tracks (playlist_id, file_path, title, artist, album, album_artist,
-            track_number, disc_number, duration_seconds, tags_read, position)
+            track_number, disc_number, duration_seconds, tags_read, bpm, tempo_read, position)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            (SELECT bpm FROM playlist_tracks WHERE file_path = ? AND tempo_read = 1 LIMIT 1),
+            EXISTS (SELECT 1 FROM playlist_tracks WHERE file_path = ? AND tempo_read = 1),
             (SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = ?))
         `,
-          [playlistId, filePath, ...song, tags.has(filePath) ? 1 : 0, playlistId],
+          [playlistId, filePath, ...song, tags.has(filePath) ? 1 : 0, filePath, filePath, playlistId],
         )
       }
       this.db.run('COMMIT')
@@ -106,9 +110,9 @@ export class PlaylistDatabase {
     this.run(
       `
       INSERT OR IGNORE INTO playlist_tracks (playlist_id, file_path, title, artist, album, album_artist,
-        track_number, disc_number, duration_seconds, tags_read, position)
+        track_number, disc_number, duration_seconds, tags_read, bpm, tempo_read, position)
       SELECT ?, file_path, title, artist, album, album_artist, track_number, disc_number, duration_seconds, tags_read,
-        (SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = ?)
+        bpm, tempo_read, (SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = ?)
       FROM playlist_tracks WHERE id = ?
     `,
       [playlistId, playlistId, trackId],
@@ -144,6 +148,19 @@ export class PlaylistDatabase {
       this.db.run('ROLLBACK')
       throw error
     }
+    this.persist()
+  }
+
+  /** Saved files whose tempo hasn't been detected yet (just added, or unreadable last time). */
+  filesNeedingTempo(): string[] {
+    return this.query<{ filePath: string }>(
+      'SELECT file_path AS filePath FROM playlist_tracks WHERE tempo_read = 0 GROUP BY file_path ORDER BY MIN(id)',
+    ).map((row) => row.filePath)
+  }
+
+  // Saves a file's detected tempo (undefined: it has no steady beat) on every copy of it.
+  saveTempo(filePath: string, bpm: number | undefined): void {
+    this.run('UPDATE playlist_tracks SET bpm = ?, tempo_read = 1 WHERE file_path = ?', [bpm ?? null, filePath])
     this.persist()
   }
 
@@ -247,6 +264,8 @@ export class PlaylistDatabase {
       track_number: 'INTEGER',
       disc_number: 'INTEGER',
       tags_read: 'INTEGER NOT NULL DEFAULT 0',
+      bpm: 'REAL',
+      tempo_read: 'INTEGER NOT NULL DEFAULT 0',
     }
     for (const [name, definition] of Object.entries(added)) {
       if (!columns.has(name)) this.run(`ALTER TABLE playlist_tracks ADD COLUMN ${name} ${definition}`)
@@ -308,6 +327,14 @@ export class PlaylistDatabase {
     return description
   }
 
+  // When tempo detection improves, songs an older version found no tempo for are detected again, once per version.
+  private retryMissingTempos(): void {
+    const saved = this.query<{ value: string }>('SELECT value FROM app_meta WHERE key = ?', ['tempo_detector'])[0]
+    if (Number(saved?.value ?? 0) >= tempoDetectorVersion) return
+    this.run('UPDATE playlist_tracks SET tempo_read = 0 WHERE tempo_read = 1 AND bpm IS NULL')
+    this.run('INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)', ['tempo_detector', String(tempoDetectorVersion)])
+  }
+
   private seedStarterPlaylists(): void {
     const seeded = this.query<{ value: string }>('SELECT value FROM app_meta WHERE key = ?', [
       'starter_playlists_seeded',
@@ -331,6 +358,10 @@ export class PlaylistDatabase {
     }
   }
 }
+
+// Raise this when tempo detection gets better at finding tempos, so songs it missed before are tried again.
+// 2: finds beats that start after a long intro.
+const tempoDetectorVersion = 2
 
 const nextPlaylistPosition = '(SELECT COALESCE(MAX(position), -1) + 1 FROM playlists)'
 

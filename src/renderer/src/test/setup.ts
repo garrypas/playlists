@@ -3,15 +3,28 @@ import { cleanup } from '@testing-library/react'
 import { afterEach, beforeEach, vi } from 'vitest'
 
 // jsdom has no media playback, so <audio> gets a minimal stand-in: play/pause flip `paused`, and loading a
-// new source rewinds to the start like a real browser does. Tests drive time, duration and endings themselves.
+// new source rewinds to the start and goes back to the default speed like a real browser does. Tests drive time,
+// duration and endings themselves.
 interface MediaState {
   paused: boolean
   currentTime: number
   duration: number
+  playbackRate: number
+  defaultPlaybackRate: number
+  preservesPitch: boolean
 }
 const media = new WeakMap<HTMLMediaElement, MediaState>()
 function state(element: HTMLMediaElement): MediaState {
-  if (!media.has(element)) media.set(element, { paused: true, currentTime: 0, duration: Number.NaN })
+  if (!media.has(element)) {
+    media.set(element, {
+      paused: true,
+      currentTime: 0,
+      duration: Number.NaN,
+      playbackRate: 1,
+      defaultPlaybackRate: 1,
+      preservesPitch: true,
+    })
+  }
   return media.get(element)!
 }
 
@@ -37,6 +50,33 @@ Object.defineProperties(HTMLMediaElement.prototype, {
       state(this).currentTime = value
     },
   },
+  playbackRate: {
+    configurable: true,
+    get(this: HTMLMediaElement) {
+      return state(this).playbackRate
+    },
+    set(this: HTMLMediaElement, value: number) {
+      state(this).playbackRate = value
+    },
+  },
+  preservesPitch: {
+    configurable: true,
+    get(this: HTMLMediaElement) {
+      return state(this).preservesPitch
+    },
+    set(this: HTMLMediaElement, value: boolean) {
+      state(this).preservesPitch = value
+    },
+  },
+  defaultPlaybackRate: {
+    configurable: true,
+    get(this: HTMLMediaElement) {
+      return state(this).defaultPlaybackRate
+    },
+    set(this: HTMLMediaElement, value: number) {
+      state(this).defaultPlaybackRate = value
+    },
+  },
   src: {
     configurable: true,
     get(this: HTMLMediaElement) {
@@ -44,7 +84,8 @@ Object.defineProperties(HTMLMediaElement.prototype, {
     },
     set(this: HTMLMediaElement, value: string) {
       this.setAttribute('src', value)
-      Object.assign(state(this), { currentTime: 0, duration: Number.NaN })
+      const loaded = state(this)
+      Object.assign(loaded, { currentTime: 0, duration: Number.NaN, playbackRate: loaded.defaultPlaybackRate })
     },
   },
   play: {

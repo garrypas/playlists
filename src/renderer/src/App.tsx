@@ -11,6 +11,7 @@ import {
   Pause,
   Play,
   Plus,
+  RotateCcw,
   Search,
   SkipBack,
   SkipForward,
@@ -28,6 +29,7 @@ import { NameDialog } from './NameDialog'
 import { TrackArt } from './TrackArt'
 import {
   coverColors,
+  formatBpm,
   formatDuration,
   libraryAlbums,
   libraryArtists,
@@ -67,6 +69,15 @@ function shuffledIds(tracks: PlaylistTrack[], firstId?: number): number[] {
 
 const VOLUME_KEY = 'volume'
 
+// The tempo control speeds songs up or slows them down by up to this many percent.
+const MAX_TEMPO = 10
+
+// A tempo change as shown to the user, e.g. "+2.5%", "−1.0%" or "0%".
+function formatTempo(percent: number): string {
+  if (percent === 0) return '0%'
+  return `${percent > 0 ? '+' : '−'}${Math.abs(percent).toFixed(1)}%`
+}
+
 // The volume from last time (0–1), or full volume if it was never set or can't be read.
 function savedVolume(): number {
   try {
@@ -93,6 +104,9 @@ function App() {
   const [volume, setVolume] = useState(savedVolume)
   const [muted, setMuted] = useState(false)
   const volumeTrackRef = useRef<HTMLDivElement>(null)
+  // How much faster (positive) or slower (negative) than normal songs play, in percent. Kept across songs.
+  const [tempo, setTempo] = useState(0)
+  const tempoTrackRef = useRef<HTMLDivElement>(null)
   const [nameDialog, setNameDialog] = useState<'create' | 'rename' | null>(null)
   // Track ids in play order while shuffle is on; null when it's off.
   const [shuffleOrder, setShuffleOrder] = useState<number[] | null>(null)
@@ -144,6 +158,8 @@ function App() {
   // The volume as heard (0–100): zero while muted.
   const audibleLevel = muted ? 0 : Math.round(volume * 100)
   const audible = audibleLevel > 0
+  // The playing song's tempo at the current speed, if it's known.
+  const currentBpm = currentTrack?.bpm == null ? null : currentTrack.bpm * (1 + tempo / 100)
   const trackCount = selectedPlaylist?.tracks.length ?? 0
   // A drop position in a filtered list would be ambiguous, so reordering waits until the search is cleared.
   const canReorder = !query && trackCount > 1
@@ -172,6 +188,16 @@ function App() {
     audio.volume = volume
     audio.muted = muted
   }, [volume, muted])
+
+  // Loading a new song resets the speed to the default, so setting both keeps the tempo for the songs that follow.
+  // Pitch moves with the speed, like a turntable: Chromium's pitch-keeping time-stretch makes music stutter.
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    audio.preservesPitch = false
+    audio.defaultPlaybackRate = 1 + tempo / 100
+    audio.playbackRate = 1 + tempo / 100
+  }, [tempo])
 
   useEffect(() => {
     try {
@@ -347,6 +373,11 @@ function App() {
     if (shuffleOrder) setShuffleOrder(shuffleOrder.flatMap(sameSong))
   }
 
+  // Background changes from the main process (a song's tempo was found) are applied like any other change.
+  const applyPlaylistsRef = useRef(applyPlaylists)
+  applyPlaylistsRef.current = applyPlaylists
+  useEffect(() => window.desktop.playlists.onChanged((updated) => applyPlaylistsRef.current(updated)), [])
+
   async function addToPlaylist(song: LibrarySong, playlistId: number): Promise<boolean> {
     try {
       applyPlaylists(await window.desktop.playlists.addTrack(playlistId, song.id))
@@ -403,6 +434,34 @@ function App() {
     // Unmuting at zero volume would still be silent, so bring it back to half.
     if (muted || volume === 0) changeVolume(volume || 0.5)
     else setMuted(true)
+  }
+
+  function changeTempo(percent: number): void {
+    setTempo(Math.round(Math.min(MAX_TEMPO, Math.max(-MAX_TEMPO, percent)) * 10) / 10)
+  }
+
+  function tempoToPointer(clientX: number): void {
+    const bar = tempoTrackRef.current
+    if (!bar) return
+    const { left, width } = bar.getBoundingClientRect()
+    changeTempo(((clientX - left) / width) * 2 * MAX_TEMPO - MAX_TEMPO)
+  }
+
+  // Arrow keys fine-tune by 0.1%, Page Up/Down move 1%, and Home/End go to the slowest and fastest.
+  function handleTempoKey(event: React.KeyboardEvent): void {
+    const target = {
+      ArrowLeft: tempo - 0.1,
+      ArrowDown: tempo - 0.1,
+      ArrowRight: tempo + 0.1,
+      ArrowUp: tempo + 0.1,
+      PageDown: tempo - 1,
+      PageUp: tempo + 1,
+      Home: -MAX_TEMPO,
+      End: MAX_TEMPO,
+    }[event.key]
+    if (target === undefined) return
+    event.preventDefault()
+    changeTempo(target)
   }
 
   function handleSeekKey(event: React.KeyboardEvent): void {
@@ -875,6 +934,7 @@ function App() {
                   <span>#</span>
                   <span>TITLE</span>
                   <span>LOCATION</span>
+                  <span>BPM</span>
                   <span>TIME</span>
                   <span />
                 </div>
@@ -940,6 +1000,7 @@ function App() {
                       </span>
                     </span>
                     <span className="album-name">{track.album || 'Local audio file'}</span>
+                    <span className="track-bpm">{formatBpm(track.bpm)}</span>
                     <span className="track-duration">{formatDuration(track.durationSeconds)}</span>
                     <span className="track-actions">
                       <button
@@ -1104,35 +1165,83 @@ function App() {
             </span>
           </div>
         </div>
-        <div className="player-volume">
-          <button
-            className="icon-button control-muted"
-            aria-label={audible ? 'Mute' : 'Unmute'}
-            title={audible ? 'Mute' : 'Unmute'}
-            onClick={toggleMute}
-          >
-            {!audible ? <VolumeX size={18} /> : volume < 0.5 ? <Volume1 size={18} /> : <Volume2 size={18} />}
-          </button>
-          <div
-            className="volume-hit"
-            role="slider"
-            tabIndex={0}
-            aria-label="Volume"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={audibleLevel}
-            aria-valuetext={muted ? 'Muted' : `${audibleLevel}%`}
-            onPointerDown={(event) => {
-              event.currentTarget.setPointerCapture(event.pointerId)
-              volumeToPointer(event.clientX)
-            }}
-            onPointerMove={(event) => {
-              if (event.currentTarget.hasPointerCapture(event.pointerId)) volumeToPointer(event.clientX)
-            }}
-            onKeyDown={handleVolumeKey}
-          >
-            <div ref={volumeTrackRef} className="volume-track">
-              <span style={{ width: `${audibleLevel}%` }} />
+        <div className="player-side">
+          <div className="player-tempo">
+            <span className="tempo-readout" aria-hidden="true">
+              {currentBpm !== null && <span>{currentBpm.toFixed(1)} BPM</span>}
+              <span className={tempo === 0 ? '' : 'tempo-changed'}>{formatTempo(tempo)}</span>
+            </span>
+            <button
+              className="icon-button control-muted tempo-reset"
+              aria-label="Reset tempo"
+              title="Back to normal speed"
+              disabled={tempo === 0}
+              onClick={() => setTempo(0)}
+            >
+              <RotateCcw size={12} />
+            </button>
+            <div
+              className="tempo-hit"
+              role="slider"
+              tabIndex={0}
+              aria-label="Tempo"
+              aria-valuemin={-MAX_TEMPO}
+              aria-valuemax={MAX_TEMPO}
+              aria-valuenow={tempo}
+              aria-valuetext={
+                currentBpm === null ? formatTempo(tempo) : `${formatTempo(tempo)}, ${currentBpm.toFixed(1)} BPM`
+              }
+              title="Tempo: drag, or use the arrow keys (Page Up/Down for 1%); double-click to reset"
+              onPointerDown={(event) => {
+                event.currentTarget.setPointerCapture(event.pointerId)
+                tempoToPointer(event.clientX)
+              }}
+              onPointerMove={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) tempoToPointer(event.clientX)
+              }}
+              onDoubleClick={() => setTempo(0)}
+              onKeyDown={handleTempoKey}
+            >
+              <div ref={tempoTrackRef} className="tempo-track">
+                <span
+                  style={{
+                    left: `${50 + (Math.min(0, tempo) / MAX_TEMPO) * 50}%`,
+                    width: `${(Math.abs(tempo) / MAX_TEMPO) * 50}%`,
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+          <div className="player-volume">
+            <button
+              className="icon-button control-muted"
+              aria-label={audible ? 'Mute' : 'Unmute'}
+              title={audible ? 'Mute' : 'Unmute'}
+              onClick={toggleMute}
+            >
+              {!audible ? <VolumeX size={18} /> : volume < 0.5 ? <Volume1 size={18} /> : <Volume2 size={18} />}
+            </button>
+            <div
+              className="volume-hit"
+              role="slider"
+              tabIndex={0}
+              aria-label="Volume"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={audibleLevel}
+              aria-valuetext={muted ? 'Muted' : `${audibleLevel}%`}
+              onPointerDown={(event) => {
+                event.currentTarget.setPointerCapture(event.pointerId)
+                volumeToPointer(event.clientX)
+              }}
+              onPointerMove={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) volumeToPointer(event.clientX)
+              }}
+              onKeyDown={handleVolumeKey}
+            >
+              <div ref={volumeTrackRef} className="volume-track">
+                <span style={{ width: `${audibleLevel}%` }} />
+              </div>
             </div>
           </div>
         </div>

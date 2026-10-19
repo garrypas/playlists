@@ -4,10 +4,22 @@ import type { CreatePlaylistInput } from '../shared/playlist'
 import { handleAudioRequests, registerAudioScheme } from './audioProtocol'
 import { openPlaylistDatabase, PlaylistDatabase } from './playlistDatabase'
 import { readTagsForFiles } from './trackMetadata'
+import { createTempoScanner, detectTempoInWorker } from './trackTempo'
 
 registerAudioScheme()
 
 let playlistDatabase: PlaylistDatabase
+
+// Detects new songs' tempos in the background and sends the window the updated playlists after each one.
+const tempoWorkerPath = join(__dirname, 'tempoWorker.js')
+const tempoScanner = createTempoScanner(
+  (filePath) => detectTempoInWorker(tempoWorkerPath, filePath),
+  (filePath, bpm) => {
+    playlistDatabase.saveTempo(filePath, bpm)
+    const playlists = playlistDatabase.list()
+    for (const window of BrowserWindow.getAllWindows()) window.webContents.send('playlists:changed', playlists)
+  },
+)
 
 // Packaged apps get their icon from the bundle; in dev the app runs inside the stock Electron binary, so use ours.
 const devIcon = app.isPackaged ? undefined : join(__dirname, '../../build/icon.png')
@@ -93,7 +105,10 @@ ipcMain.handle('playlists:add-audio-files', async (_event, id: unknown) => {
     filters: [{ name: 'Audio', extensions: ['mp3', 'm4a', 'aac', 'wav', 'aiff', 'flac', 'ogg', 'opus'] }],
   })
   if (result.canceled || result.filePaths.length === 0) return playlistDatabase.list()
-  return playlistDatabase.addAudioFiles(playlistId, result.filePaths, await readTagsForFiles(result.filePaths))
+  const tags = await readTagsForFiles(result.filePaths)
+  const playlists = playlistDatabase.addAudioFiles(playlistId, result.filePaths, tags)
+  tempoScanner.scan(playlistDatabase.filesNeedingTempo())
+  return playlists
 })
 
 // The app never needs popups, external navigation, or device permissions.
@@ -116,6 +131,8 @@ app.whenReady().then(async () => {
     playlistDatabase.saveTags(await readTagsForFiles(playlistDatabase.filesNeedingTags()))
     handleAudioRequests((trackId) => playlistDatabase.getTrackFilePath(trackId))
     createWindow()
+    // Songs whose tempo wasn't found last time (added just before quitting, or unreadable) are scanned again.
+    tempoScanner.scan(playlistDatabase.filesNeedingTempo())
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -131,5 +148,6 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  tempoScanner.stop()
   playlistDatabase?.close()
 })

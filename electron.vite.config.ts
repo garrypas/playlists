@@ -40,6 +40,12 @@ export default defineConfig({
   main: {
     // music-metadata is ESM-only, so it's bundled into the CommonJS main build rather than required at runtime.
     plugins: [externalizeDepsPlugin({ exclude: ['music-metadata'] })],
+    build: {
+      rollupOptions: {
+        // Tempo detection runs on a worker thread, which loads its own entry file (out/main/tempoWorker.js).
+        input: { index: resolve('src/main/index.ts'), tempoWorker: resolve('src/main/tempoWorker.ts') },
+      },
+    },
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
