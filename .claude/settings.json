@@ -25,5 +25,16 @@
         ]
       }
     ]
+  },
+  "extraKnownMarketplaces": {
+    "audiorective": {
+      "source": {
+        "source": "github",
+        "repo": "audiorective/audiorective"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "audiorective@audiorective": true
   }
 }
