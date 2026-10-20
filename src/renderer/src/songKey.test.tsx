@@ -70,12 +70,15 @@ describe('song key', () => {
 })
 
 describe('song key at a changed tempo', () => {
-  it('shows the key each song moves to when the tempo control changes its pitch', async () => {
-    await renderApp(library)
+  it('shows the key a song moves to when its tempo changes its pitch, leaving the others as they are', async () => {
+    const { user } = await renderApp(library)
     pressOnTempo('End')
     expect(within(songRow('One')).getByText('Ebm (Fm)')).toBeInTheDocument()
+    expect(within(songRow('Two')).getByText('F#')).toBeInTheDocument()
+    await user.click(songButton('Two'))
+    pressOnTempo('End')
     expect(within(songRow('Two')).getByText('F# (Ab)')).toBeInTheDocument()
-    expect(within(songRow('Three')).getByText('—')).toBeInTheDocument()
+    await user.click(songButton('One'))
     pressOnTempo('Home')
     expect(within(songRow('One')).getByText('Ebm (C#m)')).toBeInTheDocument()
   })
@@ -99,7 +102,8 @@ describe('song key at a changed tempo', () => {
     const { user } = await renderApp(library)
     pressOnTempo('End')
     await openExplore(user)
-    expect(within(songRow('Two')).getByText('F# (Ab)')).toBeInTheDocument()
+    expect(within(songRow('One')).getByText('Ebm (Fm)')).toBeInTheDocument()
+    expect(within(songRow('Two')).getByText('F#')).toBeInTheDocument()
     await openInLibrary(user, 'Albums', 'Isles')
     expect(within(songRow('One')).getByText('Ebm (Fm)')).toBeInTheDocument()
   })
@@ -109,12 +113,13 @@ describe('song key at a changed tempo', () => {
     await user.click(playerButton('Play'))
     expect(tempoSlider()).toHaveAttribute('aria-valuetext', '0%, 120.0 BPM, key Ebm')
     pressOnTempo('PageUp', 'PageUp', 'PageUp', 'PageUp', 'PageUp')
-    expect(tempoSlider()).toHaveAttribute('aria-valuetext', '+5.0%, 126.0 BPM, key Ebm (Em)')
+    expect(tempoSlider()).toHaveAttribute('aria-valuetext', '+5.0%, 120.0 (126.0) BPM, key Ebm (Em)')
     expect(screen.getAllByText('Ebm (Em)')).toHaveLength(2)
   })
 
-  it('shows a newly found key at the current tempo', async () => {
-    await renderApp(library)
+  it('shows a newly found key at its song’s tempo', async () => {
+    const { user } = await renderApp(library)
+    await user.click(songButton('Three'))
     pressOnTempo('End')
     keyDetected('Three', 'Am')
     expect(within(songRow('Three')).getByText('Am (Bm)')).toBeInTheDocument()

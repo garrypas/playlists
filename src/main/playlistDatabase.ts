@@ -2,7 +2,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import initSqlJs from 'sql.js'
 import type { Database as SqlDatabase, SqlValue } from 'sql.js'
-import type { CreatePlaylistInput, Playlist, PlaylistTrack } from '../shared/playlist'
+import { MAX_TEMPO_CHANGE, type CreatePlaylistInput, type Playlist, type PlaylistTrack } from '../shared/playlist'
 import type { TrackTags } from './trackMetadata'
 
 const starterPlaylists = [
@@ -44,7 +44,7 @@ export class PlaylistDatabase {
         `
         SELECT id, file_path AS filePath, title, artist, album, album_artist AS albumArtist,
           track_number AS trackNumber, disc_number AS discNumber, duration_seconds AS durationSeconds, bpm,
-          musical_key AS key, position
+          musical_key AS key, tempo_change AS tempo, position
         FROM playlist_tracks WHERE playlist_id = ? ORDER BY position, id
       `,
         [playlist.id],
@@ -187,6 +187,16 @@ export class PlaylistDatabase {
     this.persist()
   }
 
+  // Sets how much faster or slower (in percent, to 0.1) one song plays in its playlist. Other copies keep theirs.
+  setTrackTempo(trackId: number, percent: number): Playlist[] {
+    if (!Number.isSafeInteger(trackId) || trackId < 1) throw new Error('Invalid track ID.')
+    if (!Number.isFinite(percent) || Math.abs(percent) > MAX_TEMPO_CHANGE) throw new Error('Invalid tempo.')
+    if (this.getTrackFilePath(trackId) === undefined) throw new Error('Song not found.')
+    this.run('UPDATE playlist_tracks SET tempo_change = ? WHERE id = ?', [Math.round(percent * 10) / 10 || 0, trackId])
+    this.persist()
+    return this.list()
+  }
+
   // Moves a playlist to `toIndex` in the list (clamped to the end) and renumbers every playlist's position.
   movePlaylist(id: number, toIndex: number): Playlist[] {
     const playlistId = this.requirePlaylist(id)
@@ -291,6 +301,7 @@ export class PlaylistDatabase {
       tempo_read: 'INTEGER NOT NULL DEFAULT 0',
       musical_key: 'TEXT',
       key_read: 'INTEGER NOT NULL DEFAULT 0',
+      tempo_change: 'REAL NOT NULL DEFAULT 0',
     }
     for (const [name, definition] of Object.entries(added)) {
       if (!columns.has(name)) this.run(`ALTER TABLE playlist_tracks ADD COLUMN ${name} ${definition}`)

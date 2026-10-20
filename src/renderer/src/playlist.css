@@ -415,7 +415,7 @@ button.queue-item:focus-visible {
 
 /* Explore: every song on this device. */
 .track-row.explore-row {
-  grid-template-columns: 37px minmax(200px, 1.35fr) minmax(110px, 1fr) minmax(110px, 1fr) 45px 64px 55px 40px;
+  grid-template-columns: 37px minmax(200px, 1.35fr) minmax(110px, 1fr) minmax(110px, 1fr) 64px 64px 55px 40px;
 }
 
 .explore-summary {
@@ -668,7 +668,8 @@ ul.library-grid {
   font-variant-numeric: tabular-nums;
 }
 
-/* Fits a key and the key the tempo moves it to, e.g. "G#m (Bbm)". */
+/* Fits a BPM or key and what the song's tempo change makes it, e.g. "128 (141)" or "G#m (Bbm)". */
+.track-bpm,
 .track-key {
   white-space: nowrap;
 }

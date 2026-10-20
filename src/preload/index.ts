@@ -21,6 +21,8 @@ const desktopApi = {
       ipcRenderer.invoke('playlists:remove-track', playlistId, trackId),
     moveTrack: (playlistId: number, trackId: number, toIndex: number): Promise<Playlist[]> =>
       ipcRenderer.invoke('playlists:move-track', playlistId, trackId, toIndex),
+    setTrackTempo: (trackId: number, percent: number): Promise<Playlist[]> =>
+      ipcRenderer.invoke('playlists:set-track-tempo', trackId, percent),
     move: (id: number, toIndex: number): Promise<Playlist[]> => ipcRenderer.invoke('playlists:move', id, toIndex),
     onChanged: (listener: (playlists: Playlist[]) => void): (() => void) => {
       const handler = (_event: IpcRendererEvent, playlists: Playlist[]): void => listener(playlists)

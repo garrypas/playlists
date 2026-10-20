@@ -358,6 +358,26 @@ describe('song tempo', () => {
   })
 })
 
+describe('song tempo change', () => {
+  it('is saved for one song in one playlist', async () => {
+    const playlist = (await invoke('playlists:list'))[3]
+    const [first, second] = playlist.tracks
+    const updated = await invoke('playlists:set-track-tempo', first.id, 2.5)
+    const saved = updated.find((item) => item.id === playlist.id)!.tracks
+    expect(saved.find((track) => track.id === first.id)?.tempo).toBe(2.5)
+    expect(saved.find((track) => track.id === second.id)?.tempo).toBe(0)
+  })
+
+  it.each([
+    ['7', 1, 'Invalid track ID.'],
+    [1, '2.5', 'Invalid tempo.'],
+    [1, 11, 'Invalid tempo.'],
+    [1, Number.POSITIVE_INFINITY, 'Invalid tempo.'],
+  ])('rejects the song %j at tempo %j', async (trackId, percent, message) => {
+    await expect(invoke('playlists:set-track-tempo', trackId, percent)).rejects.toThrow(message)
+  })
+})
+
 describe('song key', () => {
   it('is detected in the background after a song is added, and sent to the window', async () => {
     const playlist = (await invoke('playlists:list'))[1]

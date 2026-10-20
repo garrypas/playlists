@@ -22,7 +22,7 @@ import {
   VolumeX,
   X,
 } from 'lucide-react'
-import type { Playlist, PlaylistTrack } from '../../shared/playlist'
+import { MAX_TEMPO_CHANGE as MAX_TEMPO, type Playlist, type PlaylistTrack } from '../../shared/playlist'
 import { ExploreView } from './ExploreView'
 import { LibraryView, type LibrarySource } from './LibraryView'
 import { NameDialog } from './NameDialog'
@@ -31,6 +31,7 @@ import {
   coverColors,
   formatBpm,
   formatKey,
+  formatPlayerBpm,
   formatDuration,
   libraryAlbums,
   libraryArtists,
@@ -70,13 +71,22 @@ function shuffledIds(tracks: PlaylistTrack[], firstId?: number): number[] {
 
 const VOLUME_KEY = 'volume'
 
-// The tempo control speeds songs up or slows them down by up to this many percent.
-const MAX_TEMPO = 10
+// How long the tempo control waits for the user to stop adjusting before saving, so a drag isn't saved at every step.
+const TEMPO_SAVE_DELAY_MS = 300
 
 // A tempo change as shown to the user, e.g. "+2.5%", "−1.0%" or "0%".
 function formatTempo(percent: number): string {
   if (percent === 0) return '0%'
   return `${percent > 0 ? '+' : '−'}${Math.abs(percent).toFixed(1)}%`
+}
+
+// The playlists with the given tempos (percent, by track id) in place of the saved ones.
+function withTempos(playlists: Playlist[], tempos: ReadonlyMap<number, number>): Playlist[] {
+  if (tempos.size === 0) return playlists
+  return playlists.map((playlist) => ({
+    ...playlist,
+    tracks: playlist.tracks.map((track) => (tempos.has(track.id) ? { ...track, tempo: tempos.get(track.id)! } : track)),
+  }))
 }
 
 // The volume from last time (0–1), or full volume if it was never set or can't be read.
@@ -90,7 +100,12 @@ function savedVolume(): number {
 }
 
 function App() {
-  const [playlists, setPlaylists] = useState<Playlist[]>([])
+  const [savedPlaylists, setPlaylists] = useState<Playlist[]>([])
+  // Tempo changes (percent, by track id) not saved yet. They're shown straight away, even over background updates.
+  const [unsavedTempos, setUnsavedTempos] = useState<ReadonlyMap<number, number>>(new Map())
+  // Saves waiting for the user to stop adjusting a song's tempo, by track id.
+  const tempoSaveTimers = useRef(new Map<number, { timer: ReturnType<typeof setTimeout>; save: () => void }>())
+  const playlists = useMemo(() => withTempos(savedPlaylists, unsavedTempos), [savedPlaylists, unsavedTempos])
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null)
   const [query, setQuery] = useState('')
   const [playing, setPlaying] = useState(false)
@@ -105,8 +120,6 @@ function App() {
   const [volume, setVolume] = useState(savedVolume)
   const [muted, setMuted] = useState(false)
   const volumeTrackRef = useRef<HTMLDivElement>(null)
-  // How much faster (positive) or slower (negative) than normal songs play, in percent. Kept across songs.
-  const [tempo, setTempo] = useState(0)
   const tempoTrackRef = useRef<HTMLDivElement>(null)
   const [nameDialog, setNameDialog] = useState<'create' | 'rename' | null>(null)
   // Track ids in play order while shuffle is on; null when it's off.
@@ -159,8 +172,10 @@ function App() {
   // The volume as heard (0–100): zero while muted.
   const audibleLevel = muted ? 0 : Math.round(volume * 100)
   const audible = audibleLevel > 0
-  // The playing song's tempo at the current speed, if it's known.
-  const currentBpm = currentTrack?.bpm == null ? null : currentTrack.bpm * (1 + tempo / 100)
+  // How much faster (positive) or slower (negative) than normal the playing song plays, in percent.
+  const tempo = currentTrack?.tempo ?? 0
+  // The playing song's BPM, and its BPM at the current speed (e.g. "120.0 (123.0) BPM"), if it's known.
+  const currentBpm = currentTrack?.bpm == null ? null : formatPlayerBpm(currentTrack.bpm, tempo)
   // The playing song's key, and the key the tempo moves it to (e.g. "Ebm (Em)"), if it's known.
   const currentKey = currentTrack?.key == null ? null : formatKey(currentTrack.key, tempo)
   const trackCount = selectedPlaylist?.tracks.length ?? 0
@@ -192,7 +207,7 @@ function App() {
     audio.muted = muted
   }, [volume, muted])
 
-  // Loading a new song resets the speed to the default, so setting both keeps the tempo for the songs that follow.
+  // Loading a new song resets the speed to the default, so both are set to the playing song's tempo.
   // Pitch moves with the speed, like a turntable: Chromium's pitch-keeping time-stretch makes music stutter.
   useEffect(() => {
     const audio = audioRef.current
@@ -200,7 +215,7 @@ function App() {
     audio.preservesPitch = false
     audio.defaultPlaybackRate = 1 + tempo / 100
     audio.playbackRate = 1 + tempo / 100
-  }, [tempo])
+  }, [tempo, currentTrack?.id])
 
   useEffect(() => {
     try {
@@ -376,6 +391,22 @@ function App() {
     if (shuffleOrder) setShuffleOrder(shuffleOrder.flatMap(sameSong))
   }
 
+  // Tempo changes still waiting to be saved are saved straight away if the window closes.
+  useEffect(() => {
+    const timers = tempoSaveTimers.current
+    function saveNow(): void {
+      for (const { timer, save } of [...timers.values()]) {
+        clearTimeout(timer)
+        save()
+      }
+    }
+    window.addEventListener('pagehide', saveNow)
+    return () => {
+      window.removeEventListener('pagehide', saveNow)
+      saveNow()
+    }
+  }, [])
+
   // Background changes from the main process (a song's tempo was found) are applied like any other change.
   const applyPlaylistsRef = useRef(applyPlaylists)
   applyPlaylistsRef.current = applyPlaylists
@@ -439,8 +470,37 @@ function App() {
     else setMuted(true)
   }
 
+  // Changes the playing song's tempo straight away, and saves it once the user stops adjusting it.
   function changeTempo(percent: number): void {
-    setTempo(Math.round(Math.min(MAX_TEMPO, Math.max(-MAX_TEMPO, percent)) * 10) / 10)
+    if (!currentTrack) return
+    const trackId = currentTrack.id
+    const value = Math.round(Math.min(MAX_TEMPO, Math.max(-MAX_TEMPO, percent)) * 10) / 10 || 0
+    setUnsavedTempos((pending) => new Map(pending).set(trackId, value))
+    clearTimeout(tempoSaveTimers.current.get(trackId)?.timer)
+    const save = (): void => {
+      tempoSaveTimers.current.delete(trackId)
+      void window.desktop.playlists.setTrackTempo(trackId, value).then(
+        (updated) => {
+          applyPlaylistsRef.current(updated)
+          forgetUnsavedTempo(trackId, value)
+        },
+        (error: unknown) => {
+          forgetUnsavedTempo(trackId, value)
+          window.alert(error instanceof Error ? error.message : 'Could not save the tempo.')
+        },
+      )
+    }
+    tempoSaveTimers.current.set(trackId, { timer: setTimeout(save, TEMPO_SAVE_DELAY_MS), save })
+  }
+
+  // Drops an unsaved tempo once it's saved (or failed), unless the user has changed it again since.
+  function forgetUnsavedTempo(trackId: number, value: number): void {
+    setUnsavedTempos((pending) => {
+      if (pending.get(trackId) !== value || tempoSaveTimers.current.has(trackId)) return pending
+      const next = new Map(pending)
+      next.delete(trackId)
+      return next
+    })
   }
 
   function tempoToPointer(clientX: number): void {
@@ -812,7 +872,6 @@ function App() {
               songs={songs}
               playlists={playlists}
               currentFilePath={currentTrack?.filePath}
-              tempo={tempo}
               playing={playing}
               onPlay={playLibrary}
               onTogglePlaying={() => setPlaying(!playing)}
@@ -823,7 +882,6 @@ function App() {
               songs={songs}
               playlists={playlists}
               currentFilePath={currentTrack?.filePath}
-              tempo={tempo}
               playing={playing}
               onPlay={(song) => playFrom('explore', song)}
               onTogglePlaying={() => setPlaying(!playing)}
@@ -1006,8 +1064,8 @@ function App() {
                       </span>
                     </span>
                     <span className="album-name">{track.album || 'Local audio file'}</span>
-                    <span className="track-bpm">{formatBpm(track.bpm)}</span>
-                    <span className="track-key">{formatKey(track.key, tempo)}</span>
+                    <span className="track-bpm">{formatBpm(track.bpm, track.tempo)}</span>
+                    <span className="track-key">{formatKey(track.key, track.tempo)}</span>
                     <span className="track-duration">{formatDuration(track.durationSeconds)}</span>
                     <span className="track-actions">
                       <button
@@ -1176,7 +1234,7 @@ function App() {
           <div className="player-tempo">
             <span className="tempo-readout" aria-hidden="true">
               {currentKey !== null && <span>{currentKey}</span>}
-              {currentBpm !== null && <span>{currentBpm.toFixed(1)} BPM</span>}
+              {currentBpm !== null && <span>{currentBpm}</span>}
               <span className={tempo === 0 ? '' : 'tempo-changed'}>{formatTempo(tempo)}</span>
             </span>
             <button
@@ -1184,7 +1242,7 @@ function App() {
               aria-label="Reset tempo"
               title="Back to normal speed"
               disabled={tempo === 0}
-              onClick={() => setTempo(0)}
+              onClick={() => changeTempo(0)}
             >
               <RotateCcw size={12} />
             </button>
@@ -1196,14 +1254,15 @@ function App() {
               aria-valuemin={-MAX_TEMPO}
               aria-valuemax={MAX_TEMPO}
               aria-valuenow={tempo}
+              aria-disabled={currentTrack ? undefined : true}
               aria-valuetext={[
                 formatTempo(tempo),
-                currentBpm === null ? null : `${currentBpm.toFixed(1)} BPM`,
+                currentBpm,
                 currentKey === null ? null : `key ${currentKey}`,
               ]
                 .filter((part) => part !== null)
                 .join(', ')}
-              title="Tempo: drag, or use the arrow keys (Page Up/Down for 1%); double-click to reset"
+              title="Tempo for this song: drag, or use the arrow keys (Page Up/Down for 1%); double-click to reset"
               onPointerDown={(event) => {
                 event.currentTarget.setPointerCapture(event.pointerId)
                 tempoToPointer(event.clientX)
@@ -1211,7 +1270,7 @@ function App() {
               onPointerMove={(event) => {
                 if (event.currentTarget.hasPointerCapture(event.pointerId)) tempoToPointer(event.clientX)
               }}
-              onDoubleClick={() => setTempo(0)}
+              onDoubleClick={() => changeTempo(0)}
               onKeyDown={handleTempoKey}
             >
               <div ref={tempoTrackRef} className="tempo-track">

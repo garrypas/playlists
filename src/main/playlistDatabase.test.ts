@@ -392,6 +392,40 @@ describe('song tempo', () => {
   })
 })
 
+describe('song tempo change', () => {
+  it('starts every song at normal speed, and keeps a change to one song after a restart', async () => {
+    const playlist = db.list()[0]
+    db.addAudioFiles(playlist.id, ['/music/a.mp3', '/music/b.mp3'])
+    expect(db.list()[0].tracks.map((track) => track.tempo)).toEqual([0, 0])
+    db.setTrackTempo(db.list()[0].tracks[0].id, 2.5)
+    await reopen()
+    expect(db.list()[0].tracks.map((track) => track.tempo)).toEqual([2.5, 0])
+  })
+
+  it('keeps each playlist’s tempo for a song separate, and starts a copied song at normal speed', () => {
+    const [first, second, third] = db.list()
+    const song = db.addAudioFiles(first.id, ['/music/a.mp3'])[0].tracks[0]
+    db.setTrackTempo(song.id, -4)
+    expect(db.addTrack(second.id, song.id)[1].tracks[0].tempo).toBe(0)
+    expect(db.addAudioFiles(third.id, ['/music/a.mp3'])[2].tracks[0].tempo).toBe(0)
+    expect(db.list()[0].tracks[0].tempo).toBe(-4)
+  })
+
+  it('rounds to 0.1% and goes back to normal speed', () => {
+    const song = db.addAudioFiles(db.list()[0].id, ['/music/a.mp3'])[0].tracks[0]
+    expect(db.setTrackTempo(song.id, 1.2345)[0].tracks[0].tempo).toBe(1.2)
+    expect(db.setTrackTempo(song.id, 0)[0].tracks[0].tempo).toBe(0)
+  })
+
+  it('refuses tempos beyond ±10% and songs that don’t exist', () => {
+    const song = db.addAudioFiles(db.list()[0].id, ['/music/a.mp3'])[0].tracks[0]
+    expect(() => db.setTrackTempo(song.id, 10.1)).toThrow('Invalid tempo.')
+    expect(() => db.setTrackTempo(song.id, Number.NaN)).toThrow('Invalid tempo.')
+    expect(() => db.setTrackTempo(9999, 1)).toThrow('Song not found.')
+    expect(db.list()[0].tracks[0].tempo).toBe(0)
+  })
+})
+
 describe('song key', () => {
   it('has no key until one is found, then saves it on every copy of the file', async () => {
     const [first, second] = db.list()

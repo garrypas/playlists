@@ -9,8 +9,6 @@ export interface SongTableProps {
   playlists: Playlist[]
   currentFilePath: string | undefined
   playing: boolean
-  /** How far the tempo control has sped songs up or slowed them down, in percent; keys show where it moves them. */
-  tempo: number
   onPlay: (song: LibrarySong) => void
   onTogglePlaying: () => void
   /** Saves the song to the playlist; resolves false if that failed (the app reports the error). */
@@ -25,7 +23,6 @@ export function SongTable({
   playlists,
   currentFilePath,
   playing,
-  tempo,
   onPlay,
   onTogglePlaying,
   onAddToPlaylist,
@@ -117,8 +114,8 @@ export function SongTable({
               </span>
               <span className="album-name">{song.album || 'Local audio file'}</span>
               <span className="album-name">{song.playlistIds.map(playlistTitle).join(', ')}</span>
-              <span className="track-bpm">{formatBpm(song.bpm)}</span>
-              <span className="track-key">{formatKey(song.key, tempo)}</span>
+              <span className="track-bpm">{formatBpm(song.bpm, song.tempo)}</span>
+              <span className="track-key">{formatKey(song.key, song.tempo)}</span>
               <span className="track-duration">{formatDuration(song.durationSeconds)}</span>
               <span className="track-actions explore-actions">
                 <button

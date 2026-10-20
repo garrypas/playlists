@@ -13,6 +13,8 @@ export type SongSpec =
       durationSeconds?: number | null
       bpm?: number | null
       key?: string | null
+      /** How much faster or slower (percent) it plays in this playlist. */
+      tempo?: number
     }
 
 export interface FakeDesktop {
@@ -53,6 +55,7 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
       durationSeconds = null,
       bpm = null,
       key = null,
+      tempo = 0,
     } = typeof spec === 'string' ? { title: spec } : spec
     const id = nextTrackId++
     allTitles.set(id, title)
@@ -68,6 +71,7 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
       durationSeconds,
       bpm,
       key,
+      tempo,
       position,
     }
   }
@@ -139,12 +143,20 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
           const song = store.flatMap((item) => item.tracks).find((item) => item.id === trackId)
           if (!song) throw new Error('Song not found.')
           if (playlist.tracks.some((item) => item.filePath === song.filePath)) return
-          playlist.tracks.push(track(song, playlist.tracks.length, song.filePath))
+          // A copy starts at normal speed, like the main process.
+          playlist.tracks.push(track({ ...song, tempo: 0 }, playlist.tracks.length, song.filePath))
         }),
       removeTrack: (playlistId, trackId) =>
         call('playlists:remove-track', () => {
           const playlist = find(playlistId)
           playlist.tracks = playlist.tracks.filter((item) => item.id !== trackId)
+        }),
+      setTrackTempo: (trackId, percent) =>
+        call('playlists:set-track-tempo', () => {
+          if (!Number.isFinite(percent) || Math.abs(percent) > 10) throw new Error('Invalid tempo.')
+          const song = store.flatMap((item) => item.tracks).find((item) => item.id === trackId)
+          if (!song) throw new Error('Song not found.')
+          song.tempo = Math.round(percent * 10) / 10 || 0
         }),
       move: (id, toIndex) =>
         call('playlists:move', () => {

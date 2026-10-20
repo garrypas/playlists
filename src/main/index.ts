@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron'
 import { join } from 'node:path'
-import type { CreatePlaylistInput } from '../shared/playlist'
+import { MAX_TEMPO_CHANGE, type CreatePlaylistInput } from '../shared/playlist'
 import { handleAudioRequests, registerAudioScheme } from './audioProtocol'
 import { openPlaylistDatabase, PlaylistDatabase } from './playlistDatabase'
 import { readTagsForFiles } from './trackMetadata'
@@ -80,6 +80,13 @@ function requireIndex(value: unknown, label: string): number {
   return value
 }
 
+function requireTempo(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || Math.abs(value) > MAX_TEMPO_CHANGE) {
+    throw new Error('Invalid tempo.')
+  }
+  return value
+}
+
 function requireString(value: unknown, label: string): string {
   if (typeof value !== 'string') throw new Error(`Invalid ${label}.`)
   return value
@@ -110,6 +117,9 @@ ipcMain.handle('playlists:remove-track', (_event, playlistId: unknown, trackId: 
 )
 ipcMain.handle('playlists:move-track', (_event, playlistId: unknown, trackId: unknown, toIndex: unknown) =>
   playlistDatabase.moveTrack(requireId(playlistId, 'playlist'), requireId(trackId, 'track'), requireIndex(toIndex, 'song')),
+)
+ipcMain.handle('playlists:set-track-tempo', (_event, trackId: unknown, percent: unknown) =>
+  playlistDatabase.setTrackTempo(requireId(trackId, 'track'), requireTempo(percent)),
 )
 ipcMain.handle('playlists:move', (_event, id: unknown, toIndex: unknown) =>
   playlistDatabase.movePlaylist(requireId(id, 'playlist'), requireIndex(toIndex, 'playlist')),

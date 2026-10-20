@@ -8,9 +8,19 @@ export function formatDuration(seconds: number | null): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 
-// A song's tempo as shown in song lists: whole beats per minute, or a dash until it's known.
-export function formatBpm(bpm: number | null): string {
-  return bpm === null ? '—' : String(Math.round(bpm))
+/**
+ * A song's tempo as shown in song lists: whole beats per minute, or a dash until it's known. When the song's tempo
+ * change (in percent) makes a difference, its BPM at that speed follows in brackets, e.g. "120 (123)".
+ */
+export function formatBpm(bpm: number | null, tempo = 0): string {
+  if (bpm === null) return '—'
+  const [original, changed] = [Math.round(bpm), Math.round(bpm * (1 + tempo / 100))]
+  return changed === original ? String(original) : `${original} (${changed})`
+}
+
+// The playing song's BPM as the player shows it, to 0.1, with its BPM at the current speed in brackets once changed.
+export function formatPlayerBpm(bpm: number, tempo: number): string {
+  return tempo === 0 ? `${bpm.toFixed(1)} BPM` : `${bpm.toFixed(1)} (${(bpm * (1 + tempo / 100)).toFixed(1)}) BPM`
 }
 
 /**

@@ -16,8 +16,16 @@ export interface PlaylistTrack {
    * audio after the song is added. Null until then, or when no key fits it.
    */
   key: string | null
+  /**
+   * How much faster (positive) or slower (negative) than normal this song plays in this playlist, in percent, from
+   * -MAX_TEMPO_CHANGE to MAX_TEMPO_CHANGE in steps of 0.1. Pitch moves with it, like a turntable. 0 until changed.
+   */
+  tempo: number
   position: number
 }
+
+/** The tempo control speeds a song up or slows it down by up to this many percent. */
+export const MAX_TEMPO_CHANGE = 10
 
 export interface Playlist {
   id: number
@@ -42,6 +50,8 @@ export interface PlaylistApi {
   addTrack(playlistId: number, trackId: number): Promise<Playlist[]>
   removeTrack(playlistId: number, trackId: number): Promise<Playlist[]>
   moveTrack(playlistId: number, trackId: number, toIndex: number): Promise<Playlist[]>
+  /** Saves how much faster or slower (in percent) a song plays in its playlist. */
+  setTrackTempo(trackId: number, percent: number): Promise<Playlist[]>
   /** Moves a playlist to `toIndex` in the list of playlists. */
   move(id: number, toIndex: number): Promise<Playlist[]>
   /**
