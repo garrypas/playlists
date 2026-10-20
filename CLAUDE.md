@@ -11,6 +11,7 @@ This is a playlist app. It should allow users to create and modify playlists of 
 
 ## Commands
 
+- Use Node 24 (`.nvmrc`; run `nvm use` first). `package.json` `engines` requires it, and CI reads the version from `.nvmrc`
 - Install dependencies: `npm install`
 - Run the desktop app: `npm run dev`
 - Check TypeScript: `npm run typecheck`

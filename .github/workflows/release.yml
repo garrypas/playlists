@@ -37,11 +37,11 @@ jobs:
       # No signing certificates are configured yet, so build unsigned installers.
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version-file: .nvmrc
           cache: npm
 
       # The tag is the source of truth for the version; npm rejects tags that aren't valid semver (e.g. v1.2).
@@ -64,7 +64,7 @@ jobs:
             npx electron-builder ${{ matrix.target }} --$arch --publish never
           done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: installers-${{ matrix.os }}
           path: |
@@ -81,7 +81,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: installers
           merge-multiple: true
