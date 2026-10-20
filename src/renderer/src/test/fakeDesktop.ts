@@ -12,6 +12,7 @@ export type SongSpec =
       discNumber?: number | null
       durationSeconds?: number | null
       bpm?: number | null
+      key?: string | null
     }
 
 export interface FakeDesktop {
@@ -24,6 +25,8 @@ export interface FakeDesktop {
   pickFiles: (paths: string[]) => void
   /** The main process finished detecting a song's tempo and tells the window (`bpm` undefined: no steady beat). */
   tempoDetected: (songTitle: string, bpm: number | undefined) => void
+  /** The main process finished finding a song's key and tells the window (`key` undefined: no key fits it). */
+  keyDetected: (songTitle: string, key: string | undefined) => void
   /** Makes the next call to the main process fail, the way Electron reports it. */
   failNext: (channel: string, message: string) => void
   calls: string[]
@@ -49,6 +52,7 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
       discNumber = null,
       durationSeconds = null,
       bpm = null,
+      key = null,
     } = typeof spec === 'string' ? { title: spec } : spec
     const id = nextTrackId++
     allTitles.set(id, title)
@@ -63,6 +67,7 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
       discNumber,
       durationSeconds,
       bpm,
+      key,
       position,
     }
   }
@@ -164,17 +169,21 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
     },
   }
 
+  // Saves what was found about a song on every copy of its file, and tells the window, like the main process does.
+  function detected(songTitle: string, details: Partial<PlaylistTrack>): void {
+    const tracks = store.flatMap((playlist) => playlist.tracks)
+    const filePath = tracks.find((item) => item.title === songTitle)!.filePath
+    for (const item of tracks) if (item.filePath === filePath) Object.assign(item, details)
+    for (const listener of changeListeners) listener(structuredClone(store))
+  }
+
   return {
     api,
     saved: () => structuredClone(store),
     idOf: (songTitle) => [...allTitles].find(([, title]) => title === songTitle)![0],
     titleOf: (songId) => allTitles.get(songId),
-    tempoDetected: (songTitle, bpm) => {
-      const tracks = store.flatMap((playlist) => playlist.tracks)
-      const filePath = tracks.find((item) => item.title === songTitle)!.filePath
-      for (const item of tracks) if (item.filePath === filePath) item.bpm = bpm ?? null
-      for (const listener of changeListeners) listener(structuredClone(store))
-    },
+    tempoDetected: (songTitle, bpm) => detected(songTitle, { bpm: bpm ?? null }),
+    keyDetected: (songTitle, key) => detected(songTitle, { key: key ?? null }),
     pickFiles: (paths) => {
       picked = paths
     },

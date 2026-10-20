@@ -4,22 +4,38 @@ import type { CreatePlaylistInput } from '../shared/playlist'
 import { handleAudioRequests, registerAudioScheme } from './audioProtocol'
 import { openPlaylistDatabase, PlaylistDatabase } from './playlistDatabase'
 import { readTagsForFiles } from './trackMetadata'
-import { createTempoScanner, detectTempoInWorker } from './trackTempo'
+import { analyseInWorker, createBackgroundScanner } from './backgroundAnalysis'
 
 registerAudioScheme()
 
 let playlistDatabase: PlaylistDatabase
 
-// Detects new songs' tempos in the background and sends the window the updated playlists after each one.
-const tempoWorkerPath = join(__dirname, 'tempoWorker.js')
-const tempoScanner = createTempoScanner(
-  (filePath) => detectTempoInWorker(tempoWorkerPath, filePath),
+function sendPlaylistsToWindows(): void {
+  const playlists = playlistDatabase.list()
+  for (const window of BrowserWindow.getAllWindows()) window.webContents.send('playlists:changed', playlists)
+}
+
+// Detects new songs' tempos and keys in the background and sends the window the updated playlists after each one.
+const analysisWorkerPath = join(__dirname, 'analysisWorker.js')
+const tempoScanner = createBackgroundScanner(
+  (filePath) => analyseInWorker(analysisWorkerPath, 'tempo', filePath),
   (filePath, bpm) => {
     playlistDatabase.saveTempo(filePath, bpm)
-    const playlists = playlistDatabase.list()
-    for (const window of BrowserWindow.getAllWindows()) window.webContents.send('playlists:changed', playlists)
+    sendPlaylistsToWindows()
   },
 )
+const keyScanner = createBackgroundScanner(
+  (filePath) => analyseInWorker(analysisWorkerPath, 'key', filePath),
+  (filePath, key) => {
+    playlistDatabase.saveKey(filePath, key)
+    sendPlaylistsToWindows()
+  },
+)
+
+function scanForMissingDetails(): void {
+  tempoScanner.scan(playlistDatabase.filesNeedingTempo())
+  keyScanner.scan(playlistDatabase.filesNeedingKey())
+}
 
 // Packaged apps get their icon from the bundle; in dev the app runs inside the stock Electron binary, so use ours.
 const devIcon = app.isPackaged ? undefined : join(__dirname, '../../build/icon.png')
@@ -107,7 +123,7 @@ ipcMain.handle('playlists:add-audio-files', async (_event, id: unknown) => {
   if (result.canceled || result.filePaths.length === 0) return playlistDatabase.list()
   const tags = await readTagsForFiles(result.filePaths)
   const playlists = playlistDatabase.addAudioFiles(playlistId, result.filePaths, tags)
-  tempoScanner.scan(playlistDatabase.filesNeedingTempo())
+  scanForMissingDetails()
   return playlists
 })
 
@@ -131,8 +147,9 @@ app.whenReady().then(async () => {
     playlistDatabase.saveTags(await readTagsForFiles(playlistDatabase.filesNeedingTags()))
     handleAudioRequests((trackId) => playlistDatabase.getTrackFilePath(trackId))
     createWindow()
-    // Songs whose tempo wasn't found last time (added just before quitting, or unreadable) are scanned again.
-    tempoScanner.scan(playlistDatabase.filesNeedingTempo())
+    // Songs whose tempo or key wasn't found last time (added just before quitting, saved by an older version, or
+    // unreadable) are scanned again.
+    scanForMissingDetails()
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -149,5 +166,6 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   tempoScanner.stop()
+  keyScanner.stop()
   playlistDatabase?.close()
 })

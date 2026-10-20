@@ -334,6 +334,8 @@ describe('song details from tags', () => {
     expect(db.filesNeedingTags()).toEqual(['/music/old.mp3'])
     expect(db.list()[0].tracks[0].bpm).toBeNull()
     expect(db.filesNeedingTempo()).toEqual(['/music/old.mp3'])
+    expect(db.list()[0].tracks[0].key).toBeNull()
+    expect(db.filesNeedingKey()).toEqual(['/music/old.mp3'])
     // Playlists keep their creation order, and new ones go after them.
     db.create({ title: 'Newer' })
     expect(titles()).toEqual(['Old favourites', 'Newer'])
@@ -387,6 +389,46 @@ describe('song tempo', () => {
     expect(db.addTrack(second.id, song.id)[1].tracks[0].bpm).toBe(128)
     expect(db.addAudioFiles(third.id, ['/music/a.mp3'])[2].tracks[0].bpm).toBe(128)
     expect(db.filesNeedingTempo()).toEqual([])
+  })
+})
+
+describe('song key', () => {
+  it('has no key until one is found, then saves it on every copy of the file', async () => {
+    const [first, second] = db.list()
+    db.addAudioFiles(first.id, ['/music/a.mp3', '/music/b.mp3'])
+    db.addAudioFiles(second.id, ['/music/a.mp3'])
+    expect(db.list()[0].tracks.map((track) => track.key)).toEqual([null, null])
+    expect(db.filesNeedingKey()).toEqual(['/music/a.mp3', '/music/b.mp3'])
+    db.saveKey('/music/a.mp3', 'Ebm')
+    await reopen()
+    expect(db.list()[0].tracks.map((track) => track.key)).toEqual(['Ebm', null])
+    expect(db.list()[1].tracks[0].key).toBe('Ebm')
+    expect(db.filesNeedingKey()).toEqual(['/music/b.mp3'])
+  })
+
+  it('stops asking for the key of a song no key fits', () => {
+    const playlist = db.list()[0]
+    db.addAudioFiles(playlist.id, ['/music/drums.mp3'])
+    db.saveKey('/music/drums.mp3', undefined)
+    expect(db.list()[0].tracks[0].key).toBeNull()
+    expect(db.filesNeedingKey()).toEqual([])
+  })
+
+  it('keeps the key when a song is added to another playlist, without finding it again', () => {
+    const [first, second, third] = db.list()
+    const song = db.addAudioFiles(first.id, ['/music/a.mp3'])[0].tracks[0]
+    db.saveKey('/music/a.mp3', 'F#')
+    expect(db.addTrack(second.id, song.id)[1].tracks[0].key).toBe('F#')
+    expect(db.addAudioFiles(third.id, ['/music/a.mp3'])[2].tracks[0].key).toBe('F#')
+    expect(db.filesNeedingKey()).toEqual([])
+  })
+
+  it('finds tempo and key separately', () => {
+    const playlist = db.list()[0]
+    db.addAudioFiles(playlist.id, ['/music/a.mp3'])
+    db.saveTempo('/music/a.mp3', 120)
+    expect(db.filesNeedingKey()).toEqual(['/music/a.mp3'])
+    expect(db.list()[0].tracks[0]).toMatchObject({ bpm: 120, key: null })
   })
 })
 

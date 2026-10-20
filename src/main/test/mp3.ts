@@ -7,6 +7,8 @@ export interface Mp3Tags {
   track?: string
   /** e.g. "1" or "2/2" */
   disc?: string
+  /** The song's key as DJ software writes it, e.g. "Ebm" or "2A" */
+  key?: string
   picture?: { mimeType: string; data: Buffer }
 }
 
@@ -30,6 +32,7 @@ export function mp3(tags: Mp3Tags = {}): Buffer {
     ['TPE2', tags.albumArtist],
     ['TRCK', tags.track],
     ['TPOS', tags.disc],
+    ['TKEY', tags.key],
   ]
   const frames = textFrames.flatMap(([id, value]) => (value === undefined ? [] : [textFrame(id, value)]))
   if (tags.picture) {

@@ -5,12 +5,14 @@ import {
   openExplore,
   openInLibrary,
   player,
+  pressOnTempo,
   playerButton,
   renderApp,
   songButton,
   songEnds,
   songRow,
   tempoDetected,
+  tempoSlider,
   within,
 } from './test/app'
 
@@ -20,19 +22,12 @@ const library = [
     songs: [
       { title: 'One', artist: 'Bicep', album: 'Isles', bpm: 120 },
       { title: 'Two', artist: 'Bicep', album: 'Isles', bpm: 128.4 },
-      { title: 'Three', artist: 'Bonobo', album: 'Migration' },
+      // Its key is known, so the only dash in its row is for BPM.
+      { title: 'Three', artist: 'Bonobo', album: 'Migration', key: 'Am' },
     ],
   },
   { title: 'Empty' },
 ]
-
-function tempoSlider(): HTMLElement {
-  return screen.getByRole('slider', { name: 'Tempo' })
-}
-
-function pressOnTempo(...keys: string[]): void {
-  for (const key of keys) fireEvent.keyDown(tempoSlider(), { key })
-}
 
 describe('tempo control', () => {
   it('plays songs at normal speed to begin with', async () => {
@@ -114,7 +109,7 @@ describe('tempo control', () => {
     pressOnTempo('PageUp', 'PageUp')
     expect(tempoSlider()).toHaveAttribute('aria-valuetext', '+2.0%, 131.0 BPM')
     await user.click(songButton('Three'))
-    expect(tempoSlider()).toHaveAttribute('aria-valuetext', '+2.0%')
+    expect(tempoSlider()).toHaveAttribute('aria-valuetext', '+2.0%, key Am')
   })
 
   it('works with nothing to play', async () => {
@@ -144,7 +139,7 @@ describe('song BPM', () => {
     await user.click(songButton('Three'))
     tempoDetected('Three', 100)
     expectPlaying('Three')
-    expect(tempoSlider()).toHaveAttribute('aria-valuetext', '0%, 100.0 BPM')
+    expect(tempoSlider()).toHaveAttribute('aria-valuetext', '0%, 100.0 BPM, key Am')
   })
 
   it('keeps the same song playing from Explore when another song’s BPM is detected', async () => {

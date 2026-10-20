@@ -30,6 +30,7 @@ import { TrackArt } from './TrackArt'
 import {
   coverColors,
   formatBpm,
+  formatKey,
   formatDuration,
   libraryAlbums,
   libraryArtists,
@@ -160,6 +161,8 @@ function App() {
   const audible = audibleLevel > 0
   // The playing song's tempo at the current speed, if it's known.
   const currentBpm = currentTrack?.bpm == null ? null : currentTrack.bpm * (1 + tempo / 100)
+  // The playing song's key, and the key the tempo moves it to (e.g. "Ebm (Em)"), if it's known.
+  const currentKey = currentTrack?.key == null ? null : formatKey(currentTrack.key, tempo)
   const trackCount = selectedPlaylist?.tracks.length ?? 0
   // A drop position in a filtered list would be ambiguous, so reordering waits until the search is cleared.
   const canReorder = !query && trackCount > 1
@@ -809,6 +812,7 @@ function App() {
               songs={songs}
               playlists={playlists}
               currentFilePath={currentTrack?.filePath}
+              tempo={tempo}
               playing={playing}
               onPlay={playLibrary}
               onTogglePlaying={() => setPlaying(!playing)}
@@ -819,6 +823,7 @@ function App() {
               songs={songs}
               playlists={playlists}
               currentFilePath={currentTrack?.filePath}
+              tempo={tempo}
               playing={playing}
               onPlay={(song) => playFrom('explore', song)}
               onTogglePlaying={() => setPlaying(!playing)}
@@ -935,6 +940,7 @@ function App() {
                   <span>TITLE</span>
                   <span>LOCATION</span>
                   <span>BPM</span>
+                  <span>KEY</span>
                   <span>TIME</span>
                   <span />
                 </div>
@@ -1001,6 +1007,7 @@ function App() {
                     </span>
                     <span className="album-name">{track.album || 'Local audio file'}</span>
                     <span className="track-bpm">{formatBpm(track.bpm)}</span>
+                    <span className="track-key">{formatKey(track.key, tempo)}</span>
                     <span className="track-duration">{formatDuration(track.durationSeconds)}</span>
                     <span className="track-actions">
                       <button
@@ -1168,6 +1175,7 @@ function App() {
         <div className="player-side">
           <div className="player-tempo">
             <span className="tempo-readout" aria-hidden="true">
+              {currentKey !== null && <span>{currentKey}</span>}
               {currentBpm !== null && <span>{currentBpm.toFixed(1)} BPM</span>}
               <span className={tempo === 0 ? '' : 'tempo-changed'}>{formatTempo(tempo)}</span>
             </span>
@@ -1188,9 +1196,13 @@ function App() {
               aria-valuemin={-MAX_TEMPO}
               aria-valuemax={MAX_TEMPO}
               aria-valuenow={tempo}
-              aria-valuetext={
-                currentBpm === null ? formatTempo(tempo) : `${formatTempo(tempo)}, ${currentBpm.toFixed(1)} BPM`
-              }
+              aria-valuetext={[
+                formatTempo(tempo),
+                currentBpm === null ? null : `${currentBpm.toFixed(1)} BPM`,
+                currentKey === null ? null : `key ${currentKey}`,
+              ]
+                .filter((part) => part !== null)
+                .join(', ')}
               title="Tempo: drag, or use the arrow keys (Page Up/Down for 1%); double-click to reset"
               onPointerDown={(event) => {
                 event.currentTarget.setPointerCapture(event.pointerId)

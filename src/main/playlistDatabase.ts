@@ -43,7 +43,8 @@ export class PlaylistDatabase {
       tracks: this.query<PlaylistTrack>(
         `
         SELECT id, file_path AS filePath, title, artist, album, album_artist AS albumArtist,
-          track_number AS trackNumber, disc_number AS discNumber, duration_seconds AS durationSeconds, bpm, position
+          track_number AS trackNumber, disc_number AS discNumber, duration_seconds AS durationSeconds, bpm,
+          musical_key AS key, position
         FROM playlist_tracks WHERE playlist_id = ? ORDER BY position, id
       `,
         [playlist.id],
@@ -73,7 +74,7 @@ export class PlaylistDatabase {
   }
 
   // Adds files to the end of a playlist, using their tags where `tags` has them and the file name otherwise.
-  // A file already saved in another playlist keeps the tempo found for it there.
+  // A file already saved in another playlist keeps the tempo and key found for it there.
   addAudioFiles(id: number, filePaths: string[], tags: Map<string, TrackTags> = new Map()): Playlist[] {
     const playlistId = this.requirePlaylist(id)
     this.db.run('BEGIN')
@@ -83,13 +84,22 @@ export class PlaylistDatabase {
         this.run(
           `
           INSERT OR IGNORE INTO playlist_tracks (playlist_id, file_path, title, artist, album, album_artist,
-            track_number, disc_number, duration_seconds, tags_read, bpm, tempo_read, position)
+            track_number, disc_number, duration_seconds, tags_read, bpm, tempo_read, musical_key, key_read, position)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             (SELECT bpm FROM playlist_tracks WHERE file_path = ? AND tempo_read = 1 LIMIT 1),
             EXISTS (SELECT 1 FROM playlist_tracks WHERE file_path = ? AND tempo_read = 1),
+            (SELECT musical_key FROM playlist_tracks WHERE file_path = ? AND key_read = 1 LIMIT 1),
+            EXISTS (SELECT 1 FROM playlist_tracks WHERE file_path = ? AND key_read = 1),
             (SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = ?))
         `,
-          [playlistId, filePath, ...song, tags.has(filePath) ? 1 : 0, filePath, filePath, playlistId],
+          [
+            playlistId,
+            filePath,
+            ...song,
+            tags.has(filePath) ? 1 : 0,
+            ...[filePath, filePath, filePath, filePath],
+            playlistId,
+          ],
         )
       }
       this.db.run('COMMIT')
@@ -110,9 +120,9 @@ export class PlaylistDatabase {
     this.run(
       `
       INSERT OR IGNORE INTO playlist_tracks (playlist_id, file_path, title, artist, album, album_artist,
-        track_number, disc_number, duration_seconds, tags_read, bpm, tempo_read, position)
+        track_number, disc_number, duration_seconds, tags_read, bpm, tempo_read, musical_key, key_read, position)
       SELECT ?, file_path, title, artist, album, album_artist, track_number, disc_number, duration_seconds, tags_read,
-        bpm, tempo_read, (SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = ?)
+        bpm, tempo_read, musical_key, key_read, (SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = ?)
       FROM playlist_tracks WHERE id = ?
     `,
       [playlistId, playlistId, trackId],
@@ -161,6 +171,19 @@ export class PlaylistDatabase {
   // Saves a file's detected tempo (undefined: it has no steady beat) on every copy of it.
   saveTempo(filePath: string, bpm: number | undefined): void {
     this.run('UPDATE playlist_tracks SET bpm = ?, tempo_read = 1 WHERE file_path = ?', [bpm ?? null, filePath])
+    this.persist()
+  }
+
+  /** Saved files whose key hasn't been found yet (just added, or unreadable last time). */
+  filesNeedingKey(): string[] {
+    return this.query<{ filePath: string }>(
+      'SELECT file_path AS filePath FROM playlist_tracks WHERE key_read = 0 GROUP BY file_path ORDER BY MIN(id)',
+    ).map((row) => row.filePath)
+  }
+
+  // Saves a file's key (undefined: no key fits it) on every copy of it.
+  saveKey(filePath: string, key: string | undefined): void {
+    this.run('UPDATE playlist_tracks SET musical_key = ?, key_read = 1 WHERE file_path = ?', [key ?? null, filePath])
     this.persist()
   }
 
@@ -266,6 +289,8 @@ export class PlaylistDatabase {
       tags_read: 'INTEGER NOT NULL DEFAULT 0',
       bpm: 'REAL',
       tempo_read: 'INTEGER NOT NULL DEFAULT 0',
+      musical_key: 'TEXT',
+      key_read: 'INTEGER NOT NULL DEFAULT 0',
     }
     for (const [name, definition] of Object.entries(added)) {
       if (!columns.has(name)) this.run(`ALTER TABLE playlist_tracks ADD COLUMN ${name} ${definition}`)

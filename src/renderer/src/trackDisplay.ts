@@ -1,4 +1,5 @@
 import type { Playlist, PlaylistTrack } from '../../shared/playlist'
+import { transposeKey } from '../../shared/musicalKey'
 
 export const coverColors = ['plum', 'amber', 'sky', 'rose', 'mint']
 
@@ -10,6 +11,24 @@ export function formatDuration(seconds: number | null): string {
 // A song's tempo as shown in song lists: whole beats per minute, or a dash until it's known.
 export function formatBpm(bpm: number | null): string {
   return bpm === null ? '—' : String(Math.round(bpm))
+}
+
+/**
+ * How many semitones the pitch moves when playing `tempo` percent faster (or slower, if negative), to the nearest
+ * semitone. Pitch moves with speed, like a turntable, so +10% is about 1.65 semitones higher and rounds to 2.
+ */
+export function semitoneShift(tempo: number): number {
+  return Math.round(12 * Math.log2(1 + tempo / 100)) || 0
+}
+
+/**
+ * A song's key as shown in song lists (e.g. "Ebm"), or a dash until it's known. When the tempo moves the pitch to
+ * another key, that key follows in brackets, e.g. "Ebm (Em)".
+ */
+export function formatKey(key: string | null, tempo = 0): string {
+  if (key === null) return '—'
+  const shifted = transposeKey(key, semitoneShift(tempo))
+  return shifted === undefined || shifted === key ? key : `${key} (${shifted})`
 }
 
 /** A song as Explore shows it: one entry per file, however many playlists it's in. */

@@ -529,7 +529,7 @@ button {
   width: 100%;
   height: 52px;
   display: grid;
-  grid-template-columns: 37px minmax(200px, 1.35fr) minmax(130px, 1fr) 45px 55px 80px;
+  grid-template-columns: 37px minmax(200px, 1.35fr) minmax(130px, 1fr) 45px 64px 55px 80px;
   align-items: center;
   text-align: left;
   background: transparent;
@@ -840,7 +840,7 @@ button {
   }
 
   .track-row {
-    grid-template-columns: 30px minmax(155px, 1.3fr) minmax(100px, 1fr) 38px 45px 78px;
+    grid-template-columns: 30px minmax(155px, 1.3fr) minmax(100px, 1fr) 38px 58px 45px 78px;
   }
 }
 .album-thumb {

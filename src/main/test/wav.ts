@@ -44,3 +44,23 @@ export function beat(bpm: number, seconds = 30, { introSeconds = 0 } = {}): Buff
 export function silence(seconds = 10): Buffer {
   return wav(new Float32Array(44100 * seconds))
 }
+
+/**
+ * Chords played one after another, each for `secondsPerChord`, looping for `seconds`. Each chord is a list of MIDI note
+ * numbers (60 is middle C), played as tones with a few overtones like a real instrument.
+ */
+export function chords(progression: number[][], { seconds = 20, secondsPerChord = 1 } = {}): Buffer {
+  const rate = 44100
+  const samples = new Float32Array(rate * seconds)
+  for (let i = 0; i < samples.length; i++) {
+    const time = i / rate
+    const chord = progression[Math.floor(time / secondsPerChord) % progression.length]
+    let sample = 0
+    for (const note of chord) {
+      const hz = 440 * 2 ** ((note - 69) / 12)
+      for (let overtone = 1; overtone <= 4; overtone++) sample += Math.sin(2 * Math.PI * hz * overtone * time) / overtone
+    }
+    samples[i] = (sample / chord.length) * 0.3
+  }
+  return wav(samples)
+}

@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { AudioLines, Check, Pause, Play, Plus } from 'lucide-react'
 import type { Playlist } from '../../shared/playlist'
 import { TrackArt } from './TrackArt'
-import { coverColors, formatBpm, formatDuration, type LibrarySong } from './trackDisplay'
+import { coverColors, formatBpm, formatDuration, formatKey, type LibrarySong } from './trackDisplay'
 
 export interface SongTableProps {
   songs: LibrarySong[]
   playlists: Playlist[]
   currentFilePath: string | undefined
   playing: boolean
+  /** How far the tempo control has sped songs up or slowed them down, in percent; keys show where it moves them. */
+  tempo: number
   onPlay: (song: LibrarySong) => void
   onTogglePlaying: () => void
   /** Saves the song to the playlist; resolves false if that failed (the app reports the error). */
@@ -23,6 +25,7 @@ export function SongTable({
   playlists,
   currentFilePath,
   playing,
+  tempo,
   onPlay,
   onTogglePlaying,
   onAddToPlaylist,
@@ -74,6 +77,7 @@ export function SongTable({
           <span>ALBUM</span>
           <span>IN PLAYLISTS</span>
           <span>BPM</span>
+          <span>KEY</span>
           <span>TIME</span>
           <span />
         </div>
@@ -114,6 +118,7 @@ export function SongTable({
               <span className="album-name">{song.album || 'Local audio file'}</span>
               <span className="album-name">{song.playlistIds.map(playlistTitle).join(', ')}</span>
               <span className="track-bpm">{formatBpm(song.bpm)}</span>
+              <span className="track-key">{formatKey(song.key, tempo)}</span>
               <span className="track-duration">{formatDuration(song.durationSeconds)}</span>
               <span className="track-actions explore-actions">
                 <button

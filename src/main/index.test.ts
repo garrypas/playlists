@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import type { Playlist } from '../shared/playlist'
 import { openPlaylistDatabase } from './playlistDatabase'
 import { mp3 } from './test/mp3'
-import { beat } from './test/wav'
+import { beat, chords } from './test/wav'
 
 type Handler = (...args: unknown[]) => unknown
 
@@ -61,11 +61,17 @@ vi.mock('electron', () => {
   }
 })
 
-// The worker thread loads the built tempoWorker.js, which only exists after `npm run build`, so tests detect tempos on
-// the test's own thread instead. Detection itself is real.
-vi.mock('./trackTempo', async (importOriginal) => {
-  const original = await importOriginal<typeof import('./trackTempo')>()
-  return { ...original, detectTempoInWorker: (_workerPath: string, filePath: string) => original.detectTempo(filePath) }
+// The worker thread loads the built analysisWorker.js, which only exists after `npm run build`, so tests detect tempos
+// and keys on the test's own thread instead. Detection itself is real.
+vi.mock('./backgroundAnalysis', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./backgroundAnalysis')>()
+  const { detectTempo } = await import('./trackTempo')
+  const { detectKey } = await import('./trackKey')
+  return {
+    ...original,
+    analyseInWorker: (_workerPath: string, kind: string, filePath: string) =>
+      kind === 'key' ? detectKey(filePath) : detectTempo(filePath),
+  }
 })
 
 function invoke<T = Playlist[]>(channel: string, ...args: unknown[]): Promise<T> {
@@ -81,6 +87,11 @@ const untagged = (): string => join(music, '04 untagged.mp3')
 const savedEarlier = (): string => join(music, 'saved-earlier.mp3')
 const beat124 = (): string => join(music, 'beat-124.wav')
 const beat100 = (): string => join(music, 'beat-100.wav')
+const inAMinor = (): string => join(music, 'a-minor.wav')
+const keyTagged = (): string => join(music, 'key-tagged.mp3')
+
+const songIn = (playlists: Playlist[], filePath: string) =>
+  playlists.flatMap((playlist) => playlist.tracks).find((track) => track.filePath === filePath)
 
 beforeAll(async () => {
   electron.userData = mkdtempSync(join(tmpdir(), 'playlists-main-'))
@@ -93,9 +104,12 @@ beforeAll(async () => {
   writeFileSync(savedEarlier(), mp3({ title: 'Wait', artist: 'M83', album: 'Hurry Up, We’re Dreaming' }))
   writeFileSync(beat124(), beat(124))
   writeFileSync(beat100(), beat(100))
-  // Songs saved by a version that didn't read tags or tempos: real files, and one that has since been deleted.
+  // Am, Dm, E, Am, as MIDI notes.
+  writeFileSync(inAMinor(), chords([[45, 57, 60, 64], [50, 57, 62, 65], [52, 56, 59, 64], [45, 57, 60, 64]]))
+  writeFileSync(keyTagged(), mp3({ title: 'Teardrop', key: 'D#m' }))
+  // Songs saved by a version that didn't read tags, tempos or keys: real files, and one that has since been deleted.
   const earlier = await openPlaylistDatabase(electron.userData)
-  earlier.addAudioFiles(earlier.list()[3].id, [savedEarlier(), join(music, 'deleted.mp3'), beat100()])
+  earlier.addAudioFiles(earlier.list()[3].id, [savedEarlier(), join(music, 'deleted.mp3'), beat100(), keyTagged()])
   earlier.close()
   await import('./index')
   await vi.waitFor(() => expect(electron.windows).toHaveLength(1))
@@ -316,9 +330,6 @@ describe('songs saved before tags were read', () => {
 })
 
 describe('song tempo', () => {
-  const songIn = (playlists: Playlist[], filePath: string) =>
-    playlists.flatMap((playlist) => playlist.tracks).find((track) => track.filePath === filePath)
-
   it('is detected in the background after a song is added, and sent to the window', async () => {
     const playlist = (await invoke('playlists:list'))[1]
     electron.openDialogResult = { canceled: false, filePaths: [beat124()] }
@@ -344,5 +355,34 @@ describe('song tempo', () => {
     const playlists = await invoke('playlists:list')
     expect(songIn(playlists, savedEarlier())?.bpm).toBeNull()
     expect(songIn(playlists, join(music, 'deleted.mp3'))?.bpm).toBeNull()
+  })
+})
+
+describe('song key', () => {
+  it('is detected in the background after a song is added, and sent to the window', async () => {
+    const playlist = (await invoke('playlists:list'))[1]
+    electron.openDialogResult = { canceled: false, filePaths: [inAMinor()] }
+    expect(songIn(await invoke('playlists:add-audio-files', playlist.id), inAMinor())?.key).toBeNull()
+    await vi.waitFor(async () => expect(songIn(await invoke('playlists:list'), inAMinor())?.key).toBe('Am'), {
+      timeout: 10_000,
+    })
+    const [channel, playlists] = electron.sentToWindow.at(-1)!
+    expect(channel).toBe('playlists:changed')
+    expect(songIn(playlists as Playlist[], inAMinor())?.key).toBe('Am')
+  })
+
+  it('is found at launch for songs saved before keys were, using the key in the song’s tags', async () => {
+    await vi.waitFor(async () => expect(songIn(await invoke('playlists:list'), keyTagged())?.key).toBe('Ebm'), {
+      timeout: 10_000,
+    })
+  })
+
+  it('stays unknown for a song with no key or a missing file', async () => {
+    await vi.waitFor(async () => expect(songIn(await invoke('playlists:list'), keyTagged())?.key).not.toBeNull(), {
+      timeout: 10_000,
+    })
+    const playlists = await invoke('playlists:list')
+    expect(songIn(playlists, savedEarlier())?.key).toBeNull()
+    expect(songIn(playlists, join(music, 'deleted.mp3'))?.key).toBeNull()
   })
 })

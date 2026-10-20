@@ -58,6 +58,21 @@ export function tempoDetected(title: string, bpm: number | undefined): void {
   act(() => current.tempoDetected(title, bpm))
 }
 
+/** The main process finished finding a song's key in the background (`key` undefined: no key fits it). */
+export function keyDetected(title: string, key: string | undefined): void {
+  act(() => current.keyDetected(title, key))
+}
+
+/** The player's tempo slider. */
+export function tempoSlider(): HTMLElement {
+  return screen.getByRole('slider', { name: 'Tempo' })
+}
+
+/** Presses keys on the tempo slider, e.g. "End" for +10% or "PageUp" for +1%. */
+export function pressOnTempo(...keys: string[]): void {
+  for (const key of keys) fireEvent.keyDown(tempoSlider(), { key })
+}
+
 /** Renders the app as if it had been closed last time with the volume at `percent`. */
 export function volumeLeftAt(percent: number): void {
   localStorage.setItem('volume', String(percent / 100))

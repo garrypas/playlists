@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createTempoScanner, detectTempo } from './trackTempo'
+import { detectTempo } from './trackTempo'
 import { beat, silence } from './test/wav'
 
 let music: string
@@ -37,40 +37,5 @@ describe('detecting a song’s tempo', () => {
   it('fails for a missing file or one that is not audio', async () => {
     await expect(detectTempo(file('deleted.mp3'))).rejects.toThrow()
     await expect(detectTempo(file('not-audio.mp3'))).rejects.toThrow()
-  })
-})
-
-describe('scanning songs in the background', () => {
-  it('reports each song once, in the order they were added, skipping files it cannot read', async () => {
-    const found: [string, number | undefined][] = []
-    const tempos: Record<string, number | undefined> = { a: 120, b: undefined, d: 90 }
-    const scanner = createTempoScanner(
-      async (filePath) => {
-        if (!(filePath in tempos)) throw new Error('Unreadable')
-        return tempos[filePath]
-      },
-      (filePath, bpm) => found.push([filePath, bpm]),
-    )
-    scanner.scan(['a', 'b'])
-    scanner.scan(['b', 'c', 'd'])
-    await expect.poll(() => found).toHaveLength(3)
-    expect(found).toEqual([
-      ['a', 120],
-      ['b', undefined],
-      ['d', 90],
-    ])
-  })
-
-  it('reports nothing once stopped', async () => {
-    const found: string[] = []
-    const scanner = createTempoScanner(
-      async () => 120,
-      (filePath) => found.push(filePath),
-    )
-    scanner.scan(['a'])
-    scanner.stop()
-    scanner.scan(['b'])
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(found).toEqual([])
   })
 })

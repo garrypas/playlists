@@ -42,8 +42,8 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin({ exclude: ['music-metadata'] })],
     build: {
       rollupOptions: {
-        // Tempo detection runs on a worker thread, which loads its own entry file (out/main/tempoWorker.js).
-        input: { index: resolve('src/main/index.ts'), tempoWorker: resolve('src/main/tempoWorker.ts') },
+        // Tempo and key detection run on a worker thread, which loads its own entry file (out/main/analysisWorker.js).
+        input: { index: resolve('src/main/index.ts'), analysisWorker: resolve('src/main/analysisWorker.ts') },
       },
     },
   },

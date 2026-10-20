@@ -11,6 +11,11 @@ export interface PlaylistTrack {
   durationSeconds: number | null
   /** Beats per minute, detected from the audio after the song is added; null until then or with no steady beat. */
   bpm: number | null
+  /**
+   * The musical key, e.g. "Ebm" (E flat minor) or "F#" (F sharp major): from the file's tags, else detected from the
+   * audio after the song is added. Null until then, or when no key fits it.
+   */
+  key: string | null
   position: number
 }
 
@@ -40,7 +45,7 @@ export interface PlaylistApi {
   /** Moves a playlist to `toIndex` in the list of playlists. */
   move(id: number, toIndex: number): Promise<Playlist[]>
   /**
-   * Calls `listener` with the full playlist list whenever it changes in the background (e.g. a song's tempo is found).
+   * Calls `listener` with the full playlist list whenever it changes in the background (e.g. a song's tempo or key is found).
    * Returns a function that stops listening.
    */
   onChanged(listener: (playlists: Playlist[]) => void): () => void

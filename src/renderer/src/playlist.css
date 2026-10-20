@@ -415,7 +415,7 @@ button.queue-item:focus-visible {
 
 /* Explore: every song on this device. */
 .track-row.explore-row {
-  grid-template-columns: 37px minmax(200px, 1.35fr) minmax(110px, 1fr) minmax(110px, 1fr) 45px 55px 40px;
+  grid-template-columns: 37px minmax(200px, 1.35fr) minmax(110px, 1fr) minmax(110px, 1fr) 45px 64px 55px 40px;
 }
 
 .explore-summary {
@@ -660,11 +660,17 @@ ul.library-grid {
   box-shadow: inset 0 -2px 0 #d0ed9a;
 }
 
-/* Song tempo in song lists, and the tempo control above the volume in the player bar. */
-.track-bpm {
+/* Song tempo and key in song lists, and the tempo control above the volume in the player bar. */
+.track-bpm,
+.track-key {
   font-size: 10px;
   color: #8e8d85;
   font-variant-numeric: tabular-nums;
+}
+
+/* Fits a key and the key the tempo moves it to, e.g. "G#m (Bbm)". */
+.track-key {
+  white-space: nowrap;
 }
 
 .tempo-readout {
