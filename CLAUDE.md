@@ -29,7 +29,9 @@ This is a playlist app. It should allow users to create and modify playlists of 
 - `.github/workflows/ci.yml` — GitHub Actions CI: typecheck, test and build on macOS and Windows for pushes to `main` and pull requests
 - `.github/workflows/release.yml` — on a `v*` tag, sets the app version from the tag, runs CI, then builds unsigned macOS (x64 + arm64) and Windows installers and publishes them as a GitHub release. Each architecture is packaged separately so it bundles its own ffmpeg binary (unpacked from the asar via `asarUnpack`)
 - `.claude/hooks/guard-outside-repo.mjs` — PreToolUse hook (registered in `.claude/settings.json`) that makes Claude Code ask before writing outside this repo or running unsandboxed shell commands
+- `.claude/hooks/check-agent-docs.mjs` — Stop hook (registered in `.claude/settings.json`) that sends Claude back once when files a technical agent covers changed but the agent didn't (see "Workflow for changes" step 5)
 - `.claude/agents/product.md` — product agent: the source of truth for shipped behavior, backlog and product constraints
+- `.claude/agents/tempo-and-key.md` — technical agent for BPM detection, key detection and the per-song tempo control: files, data flow, schema, algorithms, tests, pitfalls. Ask it (or read it) before changing those features instead of scanning the code
 
 ## Coding guidelines
 
@@ -64,6 +66,7 @@ This is a playlist app. It should allow users to create and modify playlists of 
    - Add new gaps or deferred ideas to "Not built".
    - Add new constraints to "Constraints that shape product scope".
    - Keep it concise: one bullet per feature, and edit existing bullets rather than appending duplicates.
+5. Keep the technical agents in `.claude/agents/` current. Each one lists the files it covers in the first column of its "## Files" table (backticked paths; a path ending in `/` covers a folder). The Stop hook reads that table, so keep it accurate when files are added, moved or renamed. When a change touches those files and alters how the feature works (flow, schema, constants, algorithms, file names, tests or pitfalls), update that agent in the same task, so it can still be trusted without reading the code. When adding a substantial new feature area, add a technical agent for it in the same format (files table, end-to-end flow, data, algorithms, tests, pitfalls, recipes, "Keeping this file current").
 
 ## Product decisions and domain terms
 

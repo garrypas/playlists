@@ -32,6 +32,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-agent-docs.mjs\"",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   },
   "extraKnownMarketplaces": {

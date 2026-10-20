@@ -407,7 +407,7 @@ function App() {
     }
   }, [])
 
-  // Background changes from the main process (a song's tempo was found) are applied like any other change.
+  // Background changes from the main process (a song's BPM or key was found) are applied like any other change.
   const applyPlaylistsRef = useRef(applyPlaylists)
   applyPlaylistsRef.current = applyPlaylists
   useEffect(() => window.desktop.playlists.onChanged((updated) => applyPlaylistsRef.current(updated)), [])
