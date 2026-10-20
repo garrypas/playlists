@@ -5,11 +5,19 @@
   },
   "permissions": {
     "deny": [
-      "Bash(git push:*)",
+      "Bash(git push *)",
+      "Bash(git push)",
+      "Bash(git reset *)",
+      "Bash(git clean *)",
       "Bash(rm -rf:*)",
       "Read(./.env)",
-      "Read(./.env.*)"
-    ]
+      "Read(./.env.*)",
+      "Read(./secrets/**)",
+      "Read(./credentials.json)",
+      "Read(./.aws/**)",
+      "Read(./.ssh/**)"
+    ],
+    "ask": ["Bash(curl *)", "Bash(wget *)"]
   },
   "hooks": {
     "PreToolUse": [

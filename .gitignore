@@ -1,6 +1,27 @@
+# generated files
+*tsbuildinfo
+build/
+coverage/
+dist/
 node_modules/
 out/
 release/
-dist/
+
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+credentials.json
+service-account*.json
+.zshrc
+.bashrc*
+
+# Cloud stuff
+.aws/
+.netrc
+.npmrc
+.ssh/
+
+# Misc.
 .DS_Store
-*tsbuildinfo
