@@ -4,8 +4,11 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   test: {
+    // Background BPM and key detection decodes real audio, which can take well over the 5s default on CI runners.
+    testTimeout: 20_000,
     projects: [
       {
+        extends: true,
         test: {
           name: 'main',
           environment: 'node',
@@ -13,6 +16,7 @@ export default defineConfig({
         },
       },
       {
+        extends: true,
         plugins: [react()],
         resolve: { alias: { '@renderer': resolve('src/renderer/src') } },
         test: {
