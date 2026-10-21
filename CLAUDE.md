@@ -32,7 +32,11 @@ This is a playlist app. It should allow users to create and modify playlists of 
 - `.claude/hooks/guard-outside-repo.mjs` — PreToolUse hook (registered in `.claude/settings.json`) that makes Claude Code ask before writing outside this repo or running unsandboxed shell commands
 - `.claude/hooks/check-agent-docs.mjs` — Stop hook (registered in `.claude/settings.json`) that sends Claude back once when files a technical agent covers changed but the agent didn't (see "Workflow for changes" step 5)
 - `.claude/agents/product.md` — product agent: the source of truth for shipped behavior, backlog and product constraints
-- `.claude/agents/tempo-and-key.md` — technical agent for BPM detection, key detection and the per-song tempo control: files, data flow, schema, algorithms, tests, pitfalls. Ask it (or read it) before changing those features instead of scanning the code
+- `.claude/agents/tempo-and-key.md` — technical agent for BPM and key detection and how a tempo change shifts the BPM and key shown: files, data flow, algorithms, tests, pitfalls. Ask it to answer, plan, review or diagnose detection work instead of scanning the code. The tempo slider and playback speed are in the `audio-engine` skill
+- `.claude/agents/database-design.md` — technical agent for the SQLite database: engine and persistence, every table and column (and whether it belongs to the file or the playlist entry), migrations, tests, pitfalls. Ask it (or read it) before any database task
+- `.claude/agents/data-api.md` — technical agent for the data API: `PlaylistDatabase` methods, `playlists:*` IPC channels and their validation, the preload bridge, the `PlaylistApi` contract and the renderer tests' fake desktop. Ask it (or read it) before adding or changing a call between the window and the database
+- `.claude/skills/audio-engine/SKILL.md` — skill for audio playback: who owns it (one `<audio>` element in the renderer, streamed by `playlist-audio://` from main), playback state and effects, what the platform can and can't do, test stand-ins and recipes. Load it before any playback or new audio feature
+- `.claude/agents/security.md` — security agent: rules for secrets and credentials, SQL and database safety, user-data logging and Electron/IPC hardening, plus the checks for a full review. Ask it to review any change that touches credentials, workflows, the schema, IPC or the renderer's privileges
 
 ## Coding guidelines
 
@@ -48,6 +52,8 @@ This is a playlist app. It should allow users to create and modify playlists of 
   - Extend the shared helpers (`src/renderer/src/test/app.tsx`, `fakeDesktop.ts`) rather than reaching into the DOM in individual tests. Don't stub what you're testing; stub only what jsdom or Node can't provide (Electron, media playback, dialogs).
 
 ## Architecture and security rules
+
+- Follow the secrets, database-safety and logging rules in `.claude/agents/security.md` for every change. In short: no credentials in source, tests, docs, renderer code or packaged assets; parameterised SQL with allowlisted identifiers; never drop tables or wipe user data as a shortcut; don't log user data. A secret found in the repo is reported with a recommendation to rotate it, because deleting it doesn't remove it from git history.
 
 - Keep UI/presentation in the renderer and desktop/native behavior in the main process.
 - Expose only explicit, minimal APIs from preload; add typed IPC methods rather than exposing Electron objects.
@@ -71,7 +77,17 @@ This is a playlist app. It should allow users to create and modify playlists of 
 
 ## Product decisions and domain terms
 
-<!-- Record decisions Claude should preserve: playlist behavior, terminology, persistence, platform differences, and UX constraints. -->
+The product agent (`.claude/agents/product.md`) has the full detail; these are the decisions to preserve without asking.
+
+- **Scope:** a local, offline, single-user desktop app. No accounts, streaming or network features; anything needing web access, arbitrary paths or new permissions needs the user's sign-off.
+- **Song vs file:** a *song* is an entry in one playlist (a `playlist_tracks` row, its own ID); a *file* is the audio on disk. The same file can be in many playlists but only once per playlist (adding it again is ignored, not an error).
+- **Per file vs per entry:** tags, BPM and key belong to the file and are shared by every copy. Position and tempo change belong to the entry; a copy starts at 0%.
+- **Explore / Your library:** every song across all playlists, shown once per file using the earliest-added copy. Songs-in-playlists only; there's no folder scanning.
+- **Tempo:** ±10% per song per playlist, and pitch moves with it like a turntable (no key lock, because Chromium's time-stretch stutters). BPM and key show their shifted values in brackets, e.g. "120 (123)", "Ebm (Em)".
+- **Key spelling:** by key signature ("Ebm", "F#", "G#m", "Bb"), never mixed sharps and flats. Unknown BPM or key shows "—".
+- **Queue:** the songs the user added with "Add to queue". They play before the rest of the list, then the list resumes. Switching playlists clears it.
+- **UX:** Spotify-like and dark, with in-app dialogs (Electron has no `window.prompt`) and inline errors where possible. A failed save shows an alert and leaves things as they were. Everything works by keyboard and screen reader.
+- **Releases:** unsigned macOS and Windows installers on GitHub releases, with no automatic updates.
 
 ## Do not
 
