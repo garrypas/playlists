@@ -25,3 +25,6 @@ service-account*.json
 
 # Misc.
 .DS_Store
+
+# Claude Code local state (e.g. an active ralph-loop)
+.claude/*.local.md

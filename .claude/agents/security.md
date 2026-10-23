@@ -20,7 +20,7 @@ The reference below says what to check and what the codebase does today. When yo
 | File | Role |
 |---|---|
 | `.gitignore` | Keeps `.env`, `.env.*`, `*.key`, `*.pem`, `credentials.json`, `service-account*.json`, `.aws/`, `.netrc`, `.npmrc`, `.ssh/` out of git |
-| `.claude/settings.json` | Sandbox on; denies reading secret files and `git push`/`reset`/`clean`, `rm -rf`; asks before `curl`/`wget`; registers the hooks |
+| `.claude/settings.json` | Sandbox on; denies reading secret files and `git push`/`reset`/`clean`, `rm -rf`; asks before `curl`/`wget`; registers the hooks; enables plugins (`audiorective`, and Anthropic's `ralph-loop` and `frontend-design` from `claude-plugins-official`). Plugin hooks run outside the sandbox: `ralph-loop` adds a bash Stop hook that reads the transcript and `.claude/ralph-loop.local.md` (git-ignored). Review any new plugin's hooks and scripts before enabling it |
 | `.claude/hooks/guard-outside-repo.mjs` | Makes Claude Code ask before writing outside the repo or running unsandboxed commands |
 | `.github/workflows/` | CI and release. Release builds are unsigned (`CSC_IDENTITY_AUTO_DISCOVERY: 'false'`) and use no repository secrets; workflows declare explicit `permissions` |
 | `electron.vite.config.ts` | The renderer's Content Security Policy (stricter in production than in dev) and which dependencies are bundled |
