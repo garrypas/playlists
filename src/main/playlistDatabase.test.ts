@@ -311,8 +311,8 @@ describe('song details from tags', () => {
     db.close()
     rmSync(userData, { recursive: true, force: true })
     userData = mkdtempSync(join(tmpdir(), 'playlists-test-'))
-    const SQL = await initSqlJs()
-    const old = new SQL.Database()
+    const sqlJs = await initSqlJs()
+    const old = new sqlJs.Database()
     old.run(`
       CREATE TABLE playlists (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL,
         description TEXT NOT NULL DEFAULT '', gradient TEXT NOT NULL DEFAULT 'sage', icon TEXT NOT NULL DEFAULT '♫',
@@ -366,8 +366,8 @@ describe('song tempo', () => {
 
   it('tries again, once, for songs an older version found no tempo for', async () => {
     db.close()
-    const SQL = await initSqlJs()
-    const old = new SQL.Database(readFileSync(join(userData, 'playlists.sqlite3')))
+    const sqlJs = await initSqlJs()
+    const old = new sqlJs.Database(readFileSync(join(userData, 'playlists.sqlite3')))
     old.run(`
       INSERT INTO playlist_tracks (playlist_id, file_path, title, position, bpm, tempo_read)
         VALUES (1, '/music/long-intro.mp3', 'long intro', 0, NULL, 1), (1, '/music/found.mp3', 'found', 1, 128, 1);

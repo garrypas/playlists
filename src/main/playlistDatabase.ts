@@ -19,11 +19,11 @@ export class PlaylistDatabase {
   ) {}
 
   static async open(filePath: string): Promise<PlaylistDatabase> {
-    const SQL = await initSqlJs({
+    const sqlJs = await initSqlJs({
       locateFile: (file) => require.resolve(`sql.js/dist/${file}`),
     })
     const bytes = existsSync(filePath) ? readFileSync(filePath) : undefined
-    const store = new PlaylistDatabase(new SQL.Database(bytes), filePath)
+    const store = new PlaylistDatabase(new sqlJs.Database(bytes), filePath)
     store.db.run('PRAGMA foreign_keys = ON')
     store.initializeSchema()
     store.migrateSchema()
