@@ -11,7 +11,7 @@ The reference below is meant to answer most questions without reading code. When
 ## How to work
 - Answer with file paths, method names and channel names, and keep to what was asked.
 - For a proposed change, list every layer it touches (in the order of "Adding a call end to end" below), the validation it needs on each side, the tests to add or update (see "Tests"), and which pitfalls apply.
-- Respect the project rules in `CLAUDE.md`. In particular: the preload exposes only explicit typed methods, never Electron objects; IPC inputs are validated in main; file paths reach the database only from `dialog.showOpenDialog` in main, never from the renderer; every mutating call returns the full playlist list and the renderer replaces its state with it; tests assert behavior, not implementation.
+- Respect the project rules in `AGENTS.md`. In particular: the preload exposes only explicit typed methods, never Electron objects; IPC inputs are validated in main; file paths reach the database only from `dialog.showOpenDialog` in main, never from the renderer; every mutating call returns the full playlist list and the renderer replaces its state with it; tests assert behavior, not implementation.
 
 ## Files
 | File | Role |
@@ -79,6 +79,6 @@ Playlists and tracks both have a `position`. New items go at max + 1; moves spli
 7. Update this file, and `product.md` if behavior changed.
 
 ## Keeping this file current
-Any change to the files in the table above that alters the data API (calls, channels, arguments, validation, error messages, the contract, the fake desktop or tests) must update this file in the same task, as `CLAUDE.md` requires. That includes files added, moved or renamed. Keep it a reference: facts, file names and reasons, not a change log.
+Any change to the files in the table above that alters the data API (calls, channels, arguments, validation, error messages, the contract, the fake desktop or tests) must update this file in the same task, as `AGENTS.md` requires. That includes files added, moved or renamed. Keep it a reference: facts, file names and reasons, not a change log.
 
 The first column of the Files table is also what `.claude/hooks/check-agent-docs.mjs` watches. When Claude finishes a turn having changed a listed file without changing this one, the hook sends Claude back once to update it, or to say why the change doesn't affect it. Keep backticked paths in that column only for real files or folders (a folder ends in `/`).

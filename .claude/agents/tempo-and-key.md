@@ -19,7 +19,7 @@ What you don't own, and where to send it:
 ## How to work
 - **Questions:** answer from this file first, with file paths and function names. Open code only for detail it doesn't give, and only the files named here. Keep to what was asked.
 - **Plans:** give the layers the change touches (in the order of "End-to-end flow"), the schema change and migration if any, whether old results need retrying ("Retrying"), the tests to add, and the pitfalls that apply. Flag anything that's a product decision (e.g. changing what's shown) as the user's call.
-- **Reviews:** check the diff against "End-to-end flow", "Pitfalls" and `CLAUDE.md` (IPC validated in main, no paths from the renderer, full list returned, tests assert behavior). Report problems with file:line, the consequence, and the fix, most serious first; say plainly when there are none.
+- **Reviews:** check the diff against "End-to-end flow", "Pitfalls" and `AGENTS.md` (IPC validated in main, no paths from the renderer, full list returned, tests assert behavior). Report problems with file:line, the consequence, and the fix, most serious first; say plainly when there are none.
 - **Diagnosis** (a song shows "—" or a wrong value): work through the flow in order: was the file queued (`*_read` flag), did the worker fail (flag stays 0, retried next launch), did the detector return undefined (flag 1, value NULL), or is it a display issue (`trackDisplay.ts`)? Name the likely cause and how to confirm it.
 - If the code and this file disagree, the code wins: say so and name the drift, so the parent session can fix this file.
 
@@ -119,6 +119,6 @@ BPM and key belong to the **file** (every copy shares them); tempo belongs to th
 - **Camelot display:** add a mapping in `musicalKey.ts` and an option in `formatKey`. Keep the stored key as the note name.
 
 ## Keeping this file current
-Any change to the files in the table above that alters how detection or the shifted display works must update this file in the same task, as `CLAUDE.md` requires. That includes files added, moved or renamed, schema changes, constants, flows and tests. Changes to the slider, saving or playback go in the `audio-engine` skill instead. Keep it a reference: facts, file names and reasons, not a change log.
+Any change to the files in the table above that alters how detection or the shifted display works must update this file in the same task, as `AGENTS.md` requires. That includes files added, moved or renamed, schema changes, constants, flows and tests. Changes to the slider, saving or playback go in the `audio-engine` skill instead. Keep it a reference: facts, file names and reasons, not a change log.
 
 The first column of the Files table is also what `.claude/hooks/check-agent-docs.mjs` watches. When Claude finishes a turn having changed a listed file without changing this one, the hook sends Claude back once to update it, or to say why the change doesn't affect it. Keep backticked paths in that column only for real files or folders (a folder ends in `/`).

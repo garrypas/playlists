@@ -11,7 +11,7 @@ The reference below is meant to answer most questions without reading code. When
 ## How to work
 - Answer with file paths, table and column names, and keep to what was asked.
 - For a proposed change, list the schema change, the migration needed for existing databases, which methods read or write the data, the tests to add or update (see "Tests"), and which pitfalls apply. If the window needs to read or change the data, hand the API side to `data-api.md`'s "Adding a call end to end".
-- Respect the project rules in `CLAUDE.md`. In particular: the database lives only in the main process, file paths are never taken from the renderer, and tests assert behavior, not implementation.
+- Respect the project rules in `AGENTS.md`. In particular: the database lives only in the main process, file paths are never taken from the renderer, and tests assert behavior, not implementation.
 
 ## Files
 | File | Role |
@@ -128,6 +128,6 @@ Then `index.ts` saves tags for `filesNeedingTags()`, creates the window, and sta
 6. Update this file, and `product.md` if behavior changed.
 
 ## Keeping this file current
-Any change to the files in the table above that alters the database (tables, columns, defaults, constraints, migrations, `app_meta` keys, persistence, the opening sequence or tests) must update this file in the same task, as `CLAUDE.md` requires. That includes files added, moved or renamed. Keep it a reference: facts, file names and reasons, not a change log.
+Any change to the files in the table above that alters the database (tables, columns, defaults, constraints, migrations, `app_meta` keys, persistence, the opening sequence or tests) must update this file in the same task, as `AGENTS.md` requires. That includes files added, moved or renamed. Keep it a reference: facts, file names and reasons, not a change log.
 
 The first column of the Files table is also what `.claude/hooks/check-agent-docs.mjs` watches. When Claude finishes a turn having changed a listed file without changing this one, the hook sends Claude back once to update it, or to say why the change doesn't affect it. Keep backticked paths in that column only for real files or folders (a folder ends in `/`).

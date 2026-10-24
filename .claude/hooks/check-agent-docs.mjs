@@ -100,7 +100,7 @@ try {
         'Files described by a technical agent changed, but the agent did not:',
         ...reminders,
         'If the change alters how that feature works (flow, schema, constants, algorithms, file names, tests or ' +
-          'pitfalls), update the agent now, as CLAUDE.md requires. If it does not, say so briefly and finish.',
+          'pitfalls), update the agent now, as AGENTS.md requires. If it does not, say so briefly and finish.',
       ].join('\n'),
     }),
   )

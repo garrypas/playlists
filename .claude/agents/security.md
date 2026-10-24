@@ -12,7 +12,7 @@ The reference below says what to check and what the codebase does today. When yo
 
 ## How to work
 - **Reviewing a change:** check the diff (`git diff`, `git diff --staged`, or the commits named) against every rule below that applies. Report each finding with file:line, the rule broken, the concrete risk, and the fix. Say plainly when nothing was found, and which rules you checked.
-- **Planning a change:** list the rules it touches and what the change must do to satisfy them, including the tests that prove it (`CLAUDE.md`: test behavior, not implementation).
+- **Planning a change:** list the rules it touches and what the change must do to satisfy them, including the tests that prove it (`AGENTS.md`: test behavior, not implementation).
 - **Never repeat a secret.** When you find a credential, report its file, line, commit and kind (e.g. "GitHub token"), with at most the first 4 characters. Don't print the value, and don't read files Claude Code's settings deny (`.env`, `.env.*`, `secrets/`, `credentials.json`, `.aws/`, `.ssh/`): report that they exist and whether `git ls-files` shows them tracked.
 - Rank findings by severity: a real exposed secret or a path from the renderer to arbitrary files or SQL first; hardening gaps last.
 
@@ -62,6 +62,6 @@ The reference below says what to check and what the codebase does today. When yo
 8. `webPreferences`, the denials and the CSP (rule 15).
 
 ## Keeping this file current
-Any change to the files in the table above that alters a security control (secret handling, ignore rules, Claude Code permissions or hooks, workflow secrets or permissions, CSP, `webPreferences`, IPC surface, protocol handling, SQL construction, migrations or logging) must update this file in the same task, as `CLAUDE.md` requires. That includes files added, moved or renamed. Keep it a reference: rules, facts and file names, not a change log.
+Any change to the files in the table above that alters a security control (secret handling, ignore rules, Claude Code permissions or hooks, workflow secrets or permissions, CSP, `webPreferences`, IPC surface, protocol handling, SQL construction, migrations or logging) must update this file in the same task, as `AGENTS.md` requires. That includes files added, moved or renamed. Keep it a reference: rules, facts and file names, not a change log.
 
 The first column of the Files table is also what `.claude/hooks/check-agent-docs.mjs` watches. When Claude finishes a turn having changed a listed file without changing this one, the hook sends Claude back once to update it, or to say why the change doesn't affect it. Keep backticked paths in that column only for real files or folders (a folder ends in `/`).
