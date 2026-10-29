@@ -13,7 +13,7 @@
     "preview": "electron-vite preview",
     "package": "npm run build && electron-builder --dir",
     "make": "npm run build && electron-builder",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
     "test:watch": "vitest"
   },
