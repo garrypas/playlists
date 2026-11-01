@@ -118,7 +118,7 @@ Not verified; check in `npm run dev` before relying on them:
 - **Repeat (one / all):** add state next to `shuffleOrder`; change `handleTrackEnded` (repeat one: `currentTime = 0` and play; repeat all: `advance(true)`). Add the button near Shuffle with `aria-pressed`, plus tests in `playback.test.tsx`.
 - **Remember the last song and position:** store `source`, the track ID and `position` (IDs, not indices) in `localStorage`, like `volume`; restore after `list()` resolves, falling back silently if the song is gone.
 - **Media keys / Now Playing:** set `navigator.mediaSession.metadata` in an effect on `currentTrack`, and register action handlers that call `setPlaying`, `playNext` and `playPrevious`. Verify on both platforms first.
-- **A tempo per file instead of per playlist entry:** a product decision first (update `product.md`). Then `setTrackTempo` updates by `file_path`, `addAudioFiles` and `addTrack` copy `tempo_change` (see the `database-design` agent), and `withTempos` and the fake desktop apply the value to every copy.
+- **A tempo per file instead of per playlist entry:** a product decision first (update `product.md`). Then `setTrackTempo` updates by `file_path`, `addAudioFiles` and `addTrack` copy `tempo_change` (see the `dba` agent), and `withTempos` and the fake desktop apply the value to every copy.
 - **Equaliser, visualiser, crossfade or key lock:** an engine change. Confirm with the user, enable CORS on `playlist-audio:` (see "Platform facts"), and build one `AudioContext` graph fed by the existing element (`createMediaElementSource`) rather than a parallel player.
 
 ## Keeping this file current

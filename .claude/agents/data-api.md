@@ -6,7 +6,7 @@ tools: Read, Grep, Glob
 
 You are the technical expert for the **data API** of **Playlists** (Electron + React + sql.js, macOS/Windows): every path data takes between the renderer and the database, and the rules each call follows.
 
-The reference below is meant to answer most questions without reading code. When you need exact detail, open only the files named here. If the code and this file disagree, the code wins: say so and name the drift, so the parent session can fix this file. Tables, columns, migrations and persistence live in `.claude/agents/database-design.md`. User-visible behavior lives in `.claude/agents/product.md`. BPM and key detection live in the `tempo-and-key` skill (`.claude/skills/tempo-and-key/SKILL.md`), and playback (including the tempo slider) in the `audio-engine` skill.
+The reference below is meant to answer most questions without reading code. When you need exact detail, open only the files named here. If the code and this file disagree, the code wins: say so and name the drift, so the parent session can fix this file. Tables, columns, migrations and persistence live in `.claude/agents/dba.md`. User-visible behavior lives in `.claude/agents/product.md`. BPM and key detection live in the `tempo-and-key` skill (`.claude/skills/tempo-and-key/SKILL.md`), and playback (including the tempo slider) in the `audio-engine` skill.
 
 ## How to work
 - Answer with file paths, method names and channel names, and keep to what was asked.
@@ -59,7 +59,7 @@ Playlists and tracks both have a `position`. New items go at max + 1; moves spli
 
 ## Tests
 - `src/main/index.test.ts`: imports the real `./index` with `electron` mocked (dialog results via `electron.openDialogResult`, `userData` in a temp folder) and `./backgroundAnalysis` mocked so detection runs on the test thread. Seeds a database with `openPlaylistDatabase` before import to simulate an older version's data. Covers handler validation and background pushes on `playlists:changed`.
-- `src/main/playlistDatabase.test.ts`: each method's behavior and error messages against a real database (see `database-design.md`).
+- `src/main/playlistDatabase.test.ts`: each method's behavior and error messages against a real database (see `dba.md`).
 - Renderer tests never touch main. `fakeDesktop.ts` implements `DesktopApi` in memory: every change returns the full list, duplicates in a playlist are ignored, a copied song starts at tempo 0. Helpers: `pickFiles(paths)` (next dialog result; empty means cancel), `failNext(channel, message)` (next call rejects like Electron), `tempoDetected` / `keyDetected` (simulate `playlists:changed`), `saved()`, `idOf(title)`, `calls`.
 
 ## Pitfalls
@@ -70,7 +70,7 @@ Playlists and tracks both have a `position`. New items go at max + 1; moves spli
 - **Don't expose Electron objects or a generic `invoke`** from preload; add one named method per call.
 
 ## Adding a call end to end
-1. Method on `PlaylistDatabase` with range/existence validation, persisted, returning `this.list()` (schema changes: see `database-design.md`).
+1. Method on `PlaylistDatabase` with range/existence validation, persisted, returning `this.list()` (schema changes: see `dba.md`).
 2. Method on `PlaylistApi` in `src/shared/playlist.ts`, documented.
 3. `ipcMain.handle('playlists:<name>', ...)` in `index.ts` with `require*` validators for every argument.
 4. `ipcRenderer.invoke` in `src/preload/index.ts` (the `satisfies PlaylistApi` check will fail until it's there).

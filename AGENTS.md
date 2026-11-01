@@ -30,7 +30,7 @@ Use Node 24 (`.nvmrc`; run `nvm use` first; `engines` and CI both rely on it).
 These hold the detail this guide leaves out. Skip each file's frontmatter and read the body before working in its area (in Claude Code they also run as subagents or skills).
 
 - `.claude/agents/product.md` — source of truth for shipped behavior, backlog and product constraints
-- `.claude/agents/database-design.md` — every table and column (per file or per entry), persistence, migrations. Before any database task
+- `.claude/agents/dba.md` — every table and column (per file or per entry), persistence, migrations. Before any database task
 - `.claude/agents/data-api.md` — `PlaylistDatabase` methods, `playlists:*` IPC and validation, preload, the `PlaylistApi` contract, the fake desktop. Before adding or changing a window–database call
 - `.claude/skills/tempo-and-key/SKILL.md` — BPM and key detection and the shifted values shown after a tempo change
 - `.claude/skills/audio-engine/SKILL.md` — playback (one `<audio>` in the renderer, streamed by `playlist-audio://`), the tempo slider, platform limits, test stand-ins. Before any playback work

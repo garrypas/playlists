@@ -9,7 +9,7 @@ Playlists finds each song's **BPM** from its audio and its **key** from the file
 
 Not covered here:
 - The tempo slider, saving a tempo change and applying it to playback: the `audio-engine` skill.
-- Tables, columns and migrations: the `database-design` agent. IPC calls and validation: the `data-api` agent. Secrets, SQL safety, hardening: the `security` agent.
+- Tables, columns and migrations: the `dba` agent. IPC calls and validation: the `data-api` agent. Secrets, SQL safety, hardening: the `security` agent.
 - What users should see and product decisions: the `product` agent (BPM, Key and Tempo bullets).
 
 If the code and this file disagree, the code wins: say so, and fix this file in the same task.
@@ -64,7 +64,7 @@ If the code and this file disagree, the code wins: say so, and fix this file in 
 | `key_read INTEGER` | 1 once found or tried successfully |
 | `tempo_change REAL` | The user's speed change for this playlist entry (selected `AS tempo`); written by the tempo control, read here for the shifted display |
 
-BPM and key belong to the **file** (every copy shares them); tempo belongs to the **playlist entry**. Explore and the library show the earliest-added copy, so their brackets use that copy's tempo. Full schema: `database-design` agent.
+BPM and key belong to the **file** (every copy shares them); tempo belongs to the **playlist entry**. Explore and the library show the earliest-added copy, so their brackets use that copy's tempo. Full schema: `dba` agent.
 
 **Retrying:** `retryMissingTempos()` with `tempoDetectorVersion` (in `app_meta` as `tempo_detector`, currently 2). When detection improves, raise the version so rows with `tempo_read = 1 AND bpm IS NULL` are retried once. Keys have no equivalent yet; add a `keyDetectorVersion` the same way if key detection improves.
 

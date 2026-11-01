@@ -1,5 +1,5 @@
 ---
-name: database-design
+name: dba
 description: Technical owner of the Playlists app's local SQLite database (sql.js in the main process): tables, columns, constraints, migrations, persistence and queries. Use before any database task (a new column or table, a query, a migration, a data bug) to plan or review the change or find where something lives, without scanning the codebase. Read-only; does not write code.
 tools: Read, Grep, Glob
 ---
