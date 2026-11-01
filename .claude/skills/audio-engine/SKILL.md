@@ -5,7 +5,7 @@ description: How audio playback works in the Playlists app and how to change it 
 
 # Audio engine
 
-Playlists plays audio with **one HTML `<audio>` element in the renderer**, fed by a custom `playlist-audio://` protocol in the main process. There is no Web Audio graph, no `AudioContext` and no playback library. BPM and key analysis decode audio separately in main with ffmpeg; that path is never used for playback. For detection, and for how BPM and key are shown at a changed tempo, ask the `tempo-and-key` agent.
+Playlists plays audio with **one HTML `<audio>` element in the renderer**, fed by a custom `playlist-audio://` protocol in the main process. There is no Web Audio graph, no `AudioContext` and no playback library. BPM and key analysis decode audio separately in main with ffmpeg; that path is never used for playback. For detection, and for how BPM and key are shown at a changed tempo, load the `tempo-and-key` skill.
 
 If the code and this file disagree, the code wins: say so, and fix this file in the same task.
 

@@ -1,13 +1,14 @@
-// Stop hook: keeps the technical agents in .claude/agents/ in step with the code they describe.
+// Stop hook: keeps the technical docs (agents in .claude/agents/, skills in .claude/skills/) in step with the code
+// they describe.
 //
-// A technical agent lists the files it covers in the first column of its "## Files" table (paths in backticks; a
+// A technical doc lists the files it covers in the first column of its "## Files" table (paths in backticks; a
 // path ending in "/" covers a whole folder). When Claude finishes a turn having changed covered files (uncommitted, or
-// committed since the last check) without changing that agent, Claude is sent back once to update the agent or say
+// committed since the last check) without changing that doc, Claude is sent back once to update the doc or say
 // why the change doesn't affect it.
 //
-// Each changed file is flagged once per agent: what's been flagged is remembered in the git folder (never committed)
+// Each changed file is flagged once per doc: what's been flagged is remembered in the git folder (never committed)
 // until the next commit, so unrelated edits to large shared files don't prompt on every turn.
-// Anything unexpected (not a git repo, no agents, a git error) lets Claude stop as normal.
+// Anything unexpected (not a git repo, no docs, a git error) lets Claude stop as normal.
 
 import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -16,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 
 const repo = process.env.CLAUDE_PROJECT_DIR || resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const agentsFolder = '.claude/agents'
+const skillsFolder = '.claude/skills'
 
 function git(...args) {
   return execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
@@ -30,7 +32,19 @@ function readStdin() {
   })
 }
 
-// The paths an agent covers: backticked entries in the first column of its "## Files" table.
+// Every technical doc, relative to the repo: each agent's .md file and each skill's SKILL.md.
+function technicalDocs() {
+  const list = (folder) => (existsSync(join(repo, folder)) ? readdirSync(join(repo, folder)) : [])
+  const agents = list(agentsFolder)
+    .filter((name) => name.endsWith('.md'))
+    .map((name) => `${agentsFolder}/${name}`)
+  const skills = list(skillsFolder)
+    .map((name) => `${skillsFolder}/${name}/SKILL.md`)
+    .filter((file) => existsSync(join(repo, file)))
+  return [...agents, ...skills]
+}
+
+// The paths a doc covers: backticked entries in the first column of its "## Files" table.
 function coveredPaths(markdown) {
   const section = /^## Files\s*$([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(markdown)?.[1] ?? ''
   const paths = new Set()
@@ -80,15 +94,13 @@ try {
   const flagged = changed.length ? (state.flagged ?? {}) : {}
 
   const reminders = []
-  const agentsPath = join(repo, agentsFolder)
-  for (const name of existsSync(agentsPath) ? readdirSync(agentsPath).filter((file) => file.endsWith('.md')) : []) {
-    const agentFile = `${agentsFolder}/${name}`
-    const paths = coveredPaths(readFileSync(join(repo, agentFile), 'utf8'))
-    if (paths.length === 0 || changed.includes(agentFile)) continue
-    const unflagged = changed.filter((file) => isCovered(file, paths) && !flagged[agentFile]?.includes(file))
+  for (const docFile of technicalDocs()) {
+    const paths = coveredPaths(readFileSync(join(repo, docFile), 'utf8'))
+    if (paths.length === 0 || changed.includes(docFile)) continue
+    const unflagged = changed.filter((file) => isCovered(file, paths) && !flagged[docFile]?.includes(file))
     if (unflagged.length === 0) continue
-    flagged[agentFile] = [...(flagged[agentFile] ?? []), ...unflagged]
-    reminders.push(`- ${agentFile} covers ${unflagged.join(', ')}`)
+    flagged[docFile] = [...(flagged[docFile] ?? []), ...unflagged]
+    reminders.push(`- ${docFile} covers ${unflagged.join(', ')}`)
   }
 
   writeFileSync(statePath, JSON.stringify({ checkedHead: head, flagged }, null, 2))
@@ -97,10 +109,10 @@ try {
     JSON.stringify({
       decision: 'block',
       reason: [
-        'Files described by a technical agent changed, but the agent did not:',
+        'Files described by a technical doc changed, but the doc did not:',
         ...reminders,
         'If the change alters how that feature works (flow, schema, constants, algorithms, file names, tests or ' +
-          'pitfalls), update the agent now, as AGENTS.md requires. If it does not, say so briefly and finish.',
+          'pitfalls), update the doc now, as AGENTS.md requires. If it does not, say so briefly and finish.',
       ].join('\n'),
     }),
   )

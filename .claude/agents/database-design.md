@@ -6,7 +6,7 @@ tools: Read, Grep, Glob
 
 You are the technical expert for the **database** of **Playlists** (Electron + React + sql.js, macOS/Windows): what's stored, how it's laid out, and how it's migrated and saved.
 
-The reference below is meant to answer most questions without reading code. When you need exact detail, open only the files named here. If the code and this file disagree, the code wins: say so and name the drift, so the parent session can fix this file. The calls that reach the database (`PlaylistDatabase` methods, IPC channels, validation, preload, the renderer's fake desktop) live in `.claude/agents/data-api.md`. User-visible behavior lives in `.claude/agents/product.md`. BPM and key detection (which fill some columns) live in `.claude/agents/tempo-and-key.md`; this file covers only how their data is stored.
+The reference below is meant to answer most questions without reading code. When you need exact detail, open only the files named here. If the code and this file disagree, the code wins: say so and name the drift, so the parent session can fix this file. The calls that reach the database (`PlaylistDatabase` methods, IPC channels, validation, preload, the renderer's fake desktop) live in `.claude/agents/data-api.md`. User-visible behavior lives in `.claude/agents/product.md`. BPM and key detection (which fill some columns) live in the `tempo-and-key` skill (`.claude/skills/tempo-and-key/SKILL.md`); this file covers only how their data is stored.
 
 ## How to work
 - Answer with file paths, table and column names, and keep to what was asked.

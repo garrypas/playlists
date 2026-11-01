@@ -32,7 +32,7 @@ These hold the detail this guide leaves out. Skip each file's frontmatter and re
 - `.claude/agents/product.md` — source of truth for shipped behavior, backlog and product constraints
 - `.claude/agents/database-design.md` — every table and column (per file or per entry), persistence, migrations. Before any database task
 - `.claude/agents/data-api.md` — `PlaylistDatabase` methods, `playlists:*` IPC and validation, preload, the `PlaylistApi` contract, the fake desktop. Before adding or changing a window–database call
-- `.claude/agents/tempo-and-key.md` — BPM and key detection and the shifted values shown after a tempo change
+- `.claude/skills/tempo-and-key/SKILL.md` — BPM and key detection and the shifted values shown after a tempo change
 - `.claude/skills/audio-engine/SKILL.md` — playback (one `<audio>` in the renderer, streamed by `playlist-audio://`), the tempo slider, platform limits, test stand-ins. Before any playback work
 - `.claude/skills/frontend-design/SKILL.md` — visual design. Before building or reshaping UI
 - `.claude/agents/security.md` — secrets, SQL safety, logging and Electron/IPC hardening. Check changes to credentials, workflows, the schema, IPC or renderer privileges against it
@@ -72,7 +72,7 @@ These hold the detail this guide leaves out. Skip each file's frontmatter and re
 2. Every behavior change adds or updates tests; every bug fix gets a test that fails without it. Run `npm test`, `npm run typecheck` and `npm run build` before calling code done.
 3. For UI changes, check the result in `npm run dev`.
 4. Keep `.claude/agents/product.md` current whenever user-visible behavior changes or the user states a requirement or decision: move shipped items from "Not built" to "Current behavior" (behavior and edge cases, not implementation), add gaps to "Not built" and constraints to "Constraints that shape product scope". One bullet per feature; edit, don't duplicate.
-5. Keep the technical docs in `.claude/agents/` current. Each lists its files in the first column of its "## Files" table (backticked paths; a trailing `/` covers a folder), which a Claude Code hook reads, so keep it accurate when files move. When a change to those files alters flow, schema, constants, algorithms, file names, tests or pitfalls, update the doc in the same task. A substantial new feature area gets its own doc in the same format (frontmatter, files table, end-to-end flow, data, algorithms, tests, pitfalls, recipes, "Keeping this file current").
+5. Keep the technical docs in `.claude/agents/` and `.claude/skills/` current. Each lists its files in the first column of its "## Files" table (backticked paths; a trailing `/` covers a folder), which a Claude Code hook reads, so keep it accurate when files move. When a change to those files alters flow, schema, constants, algorithms, file names, tests or pitfalls, update the doc in the same task. A substantial new feature area gets its own doc in the same format (frontmatter, files table, end-to-end flow, data, algorithms, tests, pitfalls, recipes, "Keeping this file current").
 
 ## Product decisions and domain terms
 

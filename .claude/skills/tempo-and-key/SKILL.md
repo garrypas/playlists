@@ -1,27 +1,24 @@
 ---
 name: tempo-and-key
-description: Technical owner of BPM detection and musical key detection in the Playlists app, and of how a song's tempo change alters the BPM and key it shows. Use to answer how detection works, plan or review a change to it (accuracy, new tag formats, a new detected detail, re-detection), or diagnose wrong or missing BPM/key values, without scanning the codebase. Read-only; does not write code.
-tools: Read, Grep, Glob
+description: How BPM detection and musical key detection work in the Playlists app, and how a song's tempo change alters the BPM and key it shows. Use before answering how detection works, planning, making or reviewing a change to it (accuracy, new tag formats, a new detected detail, re-detection), or diagnosing wrong or missing BPM/key values. Tells you the files, flow, algorithms, tests and pitfalls so you don't need to scan the code.
 ---
 
-You are the technical owner of **BPM and key detection** in **Playlists** (Electron + React + sql.js, macOS/Windows). You answer questions about it, plan changes to it, review changes to it, and diagnose wrong or missing values. You don't write code; you give the parent session what it needs to do so correctly.
+# Tempo and key
 
-What you own:
-1. **BPM:** detected from each song's audio in the background.
-2. **Key:** read from the file's key tag, else detected from the audio in the background.
-3. **Shifted display:** how a song's tempo change (±10%, pitch moving with speed) changes the BPM and key shown, e.g. "120 (123)" and "Ebm (Em)".
+Playlists finds each song's **BPM** from its audio and its **key** from the file's key tag or else the audio, both in the background in the main process. It shows how a song's tempo change (±10%, pitch moving with speed) shifts both, e.g. "120 (123)" and "Ebm (Em)".
 
-What you don't own, and where to send it:
-- The tempo slider, saving a tempo change and applying it to playback: the `audio-engine` skill (`.claude/skills/audio-engine/SKILL.md`). Read it when a question crosses into playback.
+Not covered here:
+- The tempo slider, saving a tempo change and applying it to playback: the `audio-engine` skill.
 - Tables, columns and migrations: the `database-design` agent. IPC calls and validation: the `data-api` agent. Secrets, SQL safety, hardening: the `security` agent.
 - What users should see and product decisions: the `product` agent (BPM, Key and Tempo bullets).
 
+If the code and this file disagree, the code wins: say so, and fix this file in the same task.
+
 ## How to work
-- **Questions:** answer from this file first, with file paths and function names. Open code only for detail it doesn't give, and only the files named here. Keep to what was asked.
-- **Plans:** give the layers the change touches (in the order of "End-to-end flow"), the schema change and migration if any, whether old results need retrying ("Retrying"), the tests to add, and the pitfalls that apply. Flag anything that's a product decision (e.g. changing what's shown) as the user's call.
+- **Questions:** answer from this file first, with file paths and function names. Open code only for detail it doesn't give, and only the files named here.
+- **Plans and changes:** work through the layers in the order of "End-to-end flow": the schema change and migration if any, whether old results need retrying ("Retrying"), the tests to add, and the pitfalls that apply. Anything that changes what's shown is a product decision for the user.
 - **Reviews:** check the diff against "End-to-end flow", "Pitfalls" and `AGENTS.md` (IPC validated in main, no paths from the renderer, full list returned, tests assert behavior). Report problems with file:line, the consequence, and the fix, most serious first; say plainly when there are none.
 - **Diagnosis** (a song shows "—" or a wrong value): work through the flow in order: was the file queued (`*_read` flag), did the worker fail (flag stays 0, retried next launch), did the detector return undefined (flag 1, value NULL), or is it a display issue (`trackDisplay.ts`)? Name the likely cause and how to confirm it.
-- If the code and this file disagree, the code wins: say so and name the drift, so the parent session can fix this file.
 
 ## Files
 | File | Role |
