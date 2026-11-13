@@ -47,7 +47,7 @@ You own product decisions for **Playlists**, a desktop app (Electron + React, ma
   - The queue clears when you switch or delete a playlist. A song removed from the playlist leaves the queue.
 
 ## Not built / placeholders (backlog candidates)
-- Release installers (GitHub releases) are unsigned, so macOS Gatekeeper and Windows SmartScreen warn on first open; there are no automatic updates.
+- Release installers (GitHub releases) have no developer certificate: macOS builds are only ad-hoc signed, so the first open needs "Open Anyway" in System Settings → Privacy & Security (without any signature, Apple Silicon calls the app "damaged"), and Windows SmartScreen warns on first open. There are no automatic updates.
 - Like (one global toggle that isn't saved), the "Made for you / Your rotation / New finds" tabs, and the Settings button are visual only.
 - Key can't be edited, sorted or filtered on, isn't offered in Camelot notation, and isn't re-detected after a file changes. A pitch change between two keys (e.g. +2%, a third of a semitone) is rounded to the nearer one rather than shown as detuned. Detection from audio can mistake a key for its relative major/minor or a fifth away, and assumes standard tuning (A = 440 Hz).
 - BPM can't be edited, corrected for half/double-time detections, sorted or filtered on, and isn't re-detected after a file changes. There's no beat-matching, sync or "key lock" (keeping pitch while changing tempo); a good one would need a proper time-stretch library such as SoundTouch, since Chromium's built-in one stutters.

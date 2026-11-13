@@ -4,7 +4,7 @@ A cross-platform desktop playlist manager built with Electron, React, and TypeSc
 
 ## Requirements
 
-- Node.js 20.19+ or 22.12+
+- Node.js 24 (see `.nvmrc`; run `nvm use`)
 - npm
 
 ## Development
@@ -23,6 +23,13 @@ npm run package
 ```
 
 `npm run package` creates an unpacked app in `release/`. `npm run make` creates platform installers (DMG/ZIP on macOS, NSIS installer on Windows). Build each platform on its corresponding OS for the most reliable native packaging and signing workflow.
+
+## Installing a release
+
+Installers are on the GitHub releases page. They have no developer certificate, so the first open needs a confirmation:
+
+- **macOS:** open the app once, then go to System Settings → Privacy & Security and choose **Open Anyway**.
+- **Windows:** on the SmartScreen warning, choose **More info** → **Run anyway**.
 
 ## Local playlist storage
 

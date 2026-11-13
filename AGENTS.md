@@ -22,7 +22,7 @@ Use Node 24 (`.nvmrc`; run `nvm use` first; `engines` and CI both rely on it).
 - `electron.vite.config.ts` — build config for the processes, and the renderer's CSP
 - `build/` — app icon (`icon.svg` source, `icon.png` for electron-builder and dev)
 - `.github/workflows/ci.yml` — typecheck, test and build on macOS and Windows for pushes to `main` and PRs
-- `.github/workflows/release.yml` — on a `v*` tag: set the version, run CI, build unsigned macOS (x64, arm64) and Windows installers, publish a GitHub release. Each architecture is packaged separately so it bundles its own ffmpeg (`asarUnpack`)
+- `.github/workflows/release.yml` — on a `v*` tag: set the version, run CI, build macOS (x64, arm64; ad-hoc signed, no certificate) and unsigned Windows installers, publish a GitHub release. Each architecture is packaged separately so it bundles its own ffmpeg (`asarUnpack`)
 - `.claude/` — Claude Code config. Hooks and settings only work in Claude Code; the docs below are plain Markdown for any agent.
 
 ### Reference docs
@@ -86,4 +86,4 @@ Preserve these without asking; the product doc has the detail.
 - **Key spelling:** by key signature ("Ebm", "F#", "G#m", "Bb"), never mixed. Unknown BPM or key shows "—".
 - **Queue:** songs added with "Add to queue" play before the rest of the list, then the list resumes. Switching playlists clears it.
 - **UX:** Spotify-like and dark, in-app dialogs (no `window.prompt` in Electron), inline errors where possible. A failed save shows an alert and changes nothing. Fully usable by keyboard and screen reader.
-- **Releases:** unsigned macOS and Windows installers on GitHub releases; no auto-updates.
+- **Releases:** macOS and Windows installers on GitHub releases with no developer certificate (macOS is ad-hoc signed); no auto-updates.

@@ -34,7 +34,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
-      # No signing certificates are configured yet, so build unsigned installers.
+      # No signing certificates are configured yet, so don't look for one. macOS builds are still ad-hoc signed
+      # (`build.mac.identity: "-"` in package.json); without any signature, Apple Silicon reports the app as damaged.
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - uses: actions/checkout@v7
