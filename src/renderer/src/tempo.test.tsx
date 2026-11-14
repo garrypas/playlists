@@ -151,7 +151,8 @@ describe('tempo control', () => {
     desktop.failNext('playlists:set-track-tempo', 'Disk is full.')
     pressOnTempo('End')
     await waitFor(() => expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('Disk is full.')))
-    expect(player().speed).toBe(100)
+    // The tempo reverts on the render after the alert, which a slow machine may not have reached yet.
+    await waitFor(() => expect(player().speed).toBe(100))
   })
 
   it('shows the playing song’s BPM at its tempo, or just the change when its BPM is unknown', async () => {
