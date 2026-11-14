@@ -861,7 +861,8 @@ function App() {
             </strong>
           </div>
           <div className="topbar-actions">
-            <button className="icon-button" aria-label="Settings" title="Settings">
+            {/* Hidden until there's a settings screen for it to open. */}
+            <button className="icon-button" aria-label="Settings" title="Settings" hidden>
               <SlidersHorizontal size={17} />
             </button>
           </div>

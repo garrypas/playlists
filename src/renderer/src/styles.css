@@ -142,6 +142,10 @@ button {
   margin-bottom: 13px;
 }
 
+.icon-button[hidden] {
+  display: none;
+}
+
 .icon-button {
   display: grid;
   place-items: center;

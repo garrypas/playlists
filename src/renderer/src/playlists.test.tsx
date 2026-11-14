@@ -32,6 +32,11 @@ describe('opening the app', () => {
     expect(screen.queryByText('Jamie Parker')).not.toBeInTheDocument()
   })
 
+  it('offers no Settings button while there is no settings screen', async () => {
+    await renderApp(library)
+    expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument()
+  })
+
   it('invites the user to create a playlist when there are none', async () => {
     await renderApp([])
     expect(screen.getByText('Create a playlist to start collecting your music.')).toBeInTheDocument()
