@@ -15,6 +15,7 @@ Use Node 24 (`.nvmrc`; run `nvm use` first; `engines` and CI both rely on it).
 - `npm install`, `npm run dev` (run the app)
 - `npm run typecheck`, `npm test` (or `npm run test:watch`), `npm run build`
 - `npm run package` (unpacked app), `npm run make` (installers)
+- A Husky pre-commit hook runs tests and blocks the commit if it fails
 
 ## Project structure
 
@@ -79,7 +80,7 @@ These hold the detail this guide leaves out. Skip each file's frontmatter and re
 Preserve these without asking; the product doc has the detail.
 
 - **Scope:** local, offline, single-user. No accounts, streaming or network features; web access, arbitrary paths or new permissions need the user's sign-off.
-- **Song vs file:** a *song* is one playlist entry (a `playlist_tracks` row with its own ID); a *file* is the audio on disk. A file can be in many playlists but once per playlist (re-adding is silently ignored).
+- **Song vs file:** a _song_ is one playlist entry (a `playlist_tracks` row with its own ID); a _file_ is the audio on disk. A file can be in many playlists but once per playlist (re-adding is silently ignored).
 - **Per file vs per entry:** tags, BPM and key belong to the file and are shared. Position and tempo change belong to the entry; a copy starts at 0%.
 - **Explore / Your library:** every song across all playlists, once per file (earliest-added copy). No folder scanning.
 - **Tempo:** ±10% per song per playlist; pitch moves with it like a turntable (no key lock: Chromium's time-stretch stutters). Shifted values show in brackets: "120 (123)", "Ebm (Em)".

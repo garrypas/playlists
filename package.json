@@ -15,7 +15,8 @@
     "make": "npm run build && electron-builder",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepare": "husky"
   },
   "keywords": [
     "electron",
@@ -38,6 +39,7 @@
     "electron": "^36.4.0",
     "electron-builder": "^26.0.12",
     "electron-vite": "^4.0.0",
+    "husky": "^9.1.7",
     "jsdom": "^26.1.0",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
