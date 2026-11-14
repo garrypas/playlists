@@ -1,5 +1,7 @@
 # Playlists
 
+<img width="1240" height="819" alt="image" src="https://github.com/user-attachments/assets/700b029c-e09d-4099-8d79-c622996ab8d8" />
+
 A cross-platform desktop playlist manager built with Electron, React, and TypeScript. The React renderer provides the UI; Electron's main process owns desktop capabilities, exposed through a small, typed preload API. Playlist data is stored in a local SQLite database using sql.js (SQLite compiled to WebAssembly), avoiding native module builds on macOS and Windows.
 
 ## Requirements
