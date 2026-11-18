@@ -11,6 +11,7 @@ import {
   playTo,
   pressOnTempo,
   queueButton,
+  relaunch,
   renderApp,
   songEnds,
   songLoaded,
@@ -42,6 +43,26 @@ describe('DJ mode', () => {
     await user.click(djModeButton())
     expect(djModeButton()).toHaveAttribute('aria-pressed', 'true')
     await user.click(djModeButton())
+    expect(djModeButton()).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('is still on, and still mixing, the next time the app opens', async () => {
+    const set = [{ title: 'Set', songs: [one, two] }]
+    const { user } = await renderApp(set)
+    await user.click(djModeButton())
+    const reopened = await relaunch(set)
+    expect(djModeButton()).toHaveAttribute('aria-pressed', 'true')
+    expect(tempoSlider()).toHaveAttribute('aria-disabled', 'true')
+    await reopened.user.click(playerButton('Play'))
+    songLoaded(260)
+    await waitFor(() => expect(djStatus()).toBe('DJ: 16-bar blend into Two at 3:44'))
+    playTo(224)
+    await waitFor(() => expect(djStatus()).toBe('DJ: mixing into Two (16-bar blend)'))
+    playTo(232)
+    expect(heard()).toMatchObject({ One: { bass: true }, Two: { bass: false } })
+
+    await reopened.user.click(djModeButton())
+    await relaunch(set)
     expect(djModeButton()).toHaveAttribute('aria-pressed', 'false')
   })
 
@@ -96,34 +117,47 @@ describe('DJ mode', () => {
     expect(heard().Two?.speed).toBe(100.3)
   })
 
-  it('drops the next song in when the keys clash, with its build-up under the last phrase', async () => {
-    const clashing = { ...two, bpm: 120, key: 'F#', dj: djTrack(120, { bars: 140, drops: [64] }) }
+  it('still blends when the keys clash, over the last 8 bars', async () => {
+    const clashing = { ...two, bpm: 120, key: 'F#', dj: djTrack(120, { bars: 140 }) }
     await startDj([one, clashing])
-    await waitFor(() => expect(djStatus()).toBe('DJ: Drop mix into Two at 3:44'))
-    playTo(224)
-    await waitFor(() => expect(djStatus()).toMatch(/^DJ: mixing into Two/))
+    await waitFor(() => expect(djStatus()).toBe('DJ: 8-bar blend into Two at 4:00'))
     playTo(240)
-    expect(heard()).toEqual({
-      One: { volume: 100, speed: 100, bass: true },
-      Two: { volume: 49, speed: 100, bass: false },
-    })
-    playTo(256)
+    await waitFor(() => expect(djStatus()).toMatch(/^DJ: mixing into Two/))
+    playTo(248)
     await waitFor(() => expectPlaying('Two'))
-    expect(player().time).toBe(64)
-    expect(heard().Two).toEqual({ volume: 100, speed: 100, bass: true })
-    playTo(65)
-    await waitFor(() => expect(Object.keys(heard())).toEqual(['Two']))
+    expect(heard()).toMatchObject({ One: { bass: false }, Two: { bass: true } })
   })
 
-  it('cuts to the next song on the last phrase line when the tempos can’t be matched', async () => {
+  it('filters the song out over its last 4 bars when the tempos can’t be matched, then brings the next one in', async () => {
     const fast = { ...two, bpm: 150, dj: djTrack(150, { bars: 140 }) }
     await startDj([one, fast])
-    await waitFor(() => expect(djStatus()).toBe('DJ: Cut into Two at 4:16'))
-    playTo(255)
-    expect(Object.keys(heard())).toEqual(['One'])
+    await waitFor(() => expect(djStatus()).toBe('DJ: Filter fade into Two at 4:08'))
+    playTo(247)
+    expect(heard()).toEqual({ One: { volume: 100, speed: 100, bass: true } })
+    // The high-pass sweeps up, taking One's bass and body away; Two's beat isn't heard yet.
+    playTo(252)
+    await waitFor(() => expect(heard()).toEqual({ One: { volume: 100, speed: 100, bass: true, filter: 'high-pass' } }))
     playTo(256)
     await waitFor(() => expect(heard()).toEqual({ Two: { volume: 100, speed: 100, bass: true } }))
     expectPlaying('Two')
+  })
+
+  it('fades a next song that opens without a beat in under the filtered-out song', async () => {
+    const padIntro = { ...two, bpm: 150, dj: { ...djTrack(150, { bars: 140, firstBeat: 20 }), soundStart: 0 } }
+    await startDj([one, padIntro])
+    await waitFor(() => expect(djStatus()).toBe('DJ: Filter fade into Two at 4:08'))
+    playTo(248)
+    await waitFor(() => expect(djStatus()).toMatch(/^DJ: mixing into Two/))
+    playTo(251)
+    // Both play: One with its lows filtering away, Two muffled and opening up, together never louder than one song.
+    const mixing = heard()
+    expect(mixing).toMatchObject({ One: { filter: 'high-pass' }, Two: { filter: 'low-pass' } })
+    expect(mixing.One.volume + mixing.Two.volume).toBeLessThanOrEqual(100)
+    playTo(252)
+    await waitFor(() => expectPlaying('Two'))
+    // Two came in 8 s (4 bars) before One ended.
+    playTo(8.1)
+    await waitFor(() => expect(heard()).toEqual({ Two: { volume: 100, speed: 100, bass: true } }))
   })
 
   it('fades quickly into the next song when there’s no beat to match', async () => {
@@ -132,10 +166,12 @@ describe('DJ mode', () => {
     await user.click(playerButton('Play'))
     songLoaded(200)
     await waitFor(() => expect(djStatus()).toBe('DJ: Quick fade into Two at 3:17'))
+    // The songs aren't beatmatched, so together they're never louder than one alone, and only one bassline plays.
     playTo(197.75)
-    await waitFor(() => expect(heard()).toMatchObject({ One: { volume: 92 }, Two: { volume: 38 } }))
+    await waitFor(() => expect(heard()).toMatchObject({ One: { volume: 85, bass: true }, Two: { volume: 15, bass: false } }))
     playTo(198.5)
     await waitFor(() => expectPlaying('Two'))
+    expect(heard()).toMatchObject({ One: { volume: 50, bass: false }, Two: { volume: 50, bass: true } })
     playTo(3)
     await waitFor(() => expect(Object.keys(heard())).toEqual(['Two']))
   })
@@ -196,7 +232,7 @@ describe('DJ mode', () => {
 
   it('waits for a song’s beat details if they’re still being found', async () => {
     const { desktop } = await startDj([one, { ...two, dj: undefined }])
-    await waitFor(() => expect(djStatus()).toBe('DJ: Quick fade into Two at 4:12'))
+    await waitFor(() => expect(djStatus()).toBe('DJ: Filter fade into Two at 4:08'))
     desktop.djDetailsFound('Two', two.dj)
     await waitFor(() => expect(djStatus()).toBe('DJ: 16-bar blend into Two at 3:44'))
   })

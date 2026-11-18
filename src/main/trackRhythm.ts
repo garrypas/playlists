@@ -26,6 +26,14 @@ const onsetHops = 4
 const beatSearchSeconds = 60
 // It stops following a beat after this long without one; its default of 10 s loses the beat in a long breakdown.
 const beatlessSeconds = 90
+// The tempo search: ±4% of music-tempo's tempo in steps of 0.005%, folding kicks into 4 ms phase bins. Hits weaker than
+// a log ratio of 0.5 (1.65 times the energy) aren't counted as kicks.
+const tempoSearchStep = 0.00005
+const tempoSearchSteps = 800
+const phaseBinSeconds = 0.004
+const candidateKick = 0.5
+// A change in level from one beat to the next this big (dB, full and low bands summed) suggests a bar line.
+const barStepDb = 6
 const beatsPerBar = 4
 const beatsPerPhrase = 64
 const silentDb = -60
@@ -54,10 +62,10 @@ function rhythmOfSamples(samples: Float32Array): RhythmAnalysis {
 
   const sound = soundBounds(full)
   const loudness = loudnessOf(full)
-  const grid = sound && tempo ? beatGrid(tempo, onsets, analysedSeconds) : undefined
+  const grid = sound && tempo ? beatGrid(tempo, onsets, low, analysedSeconds) : undefined
   const bpm = grid ? round(grid.bpm, 1) : tempo && inRange(tempo.bpm) ? round(tempo.bpm, 1) : undefined
 
-  const cuts = grid ? barLines(grid, full, low, analysedSeconds) : blockLines(analysedSeconds)
+  const cuts = grid && sound ? barLines(grid, full, low, analysedSeconds, sound.start) : blockLines(analysedSeconds)
   const segments = segmentsBetween(withSoundBounds(cuts, sound, analysedSeconds), grid)
   const sections = mergeSections(
     segments.map(({ start, end, kicks }) => ({ start, end, kind: kindOf(full.db(start, end), loudness, kicks) })),
@@ -216,23 +224,16 @@ interface Grid {
   confidence: number
 }
 
-// Fits a grid to the kicks near music-tempo's beats: first roughly, through its beats, then exactly, through the kicks
-// found at each predicted beat.
-function beatGrid(tempo: TempoEstimate, onsets: Float32Array, seconds: number): Grid | undefined {
-  const { beats } = tempo
-  if (beats.length < 8) return undefined
-  // Number each beat by how many periods it is after the previous one, so a missed beat doesn't shift the rest.
-  const roughPeriod = 60 / tempo.bpm
-  const numbered = beats.map((time) => ({ n: 0, time }))
-  for (let i = 1; i < beats.length; i++) {
-    numbered[i].n = numbered[i - 1].n + Math.max(1, Math.round((beats[i] - beats[i - 1]) / roughPeriod))
-  }
-  const rough = fitWithoutOutliers(numbered, 0.05)
-  if (!rough) return undefined
-  let line = onTheKicks(rough, onsets)
+// Fits a grid to the song's kicks: first the tempo and phase that line up the most kick strength across the whole song
+// (near music-tempo's tempo), then exactly, through the kicks found at each predicted beat.
+function beatGrid(tempo: TempoEstimate, onsets: Float32Array, low: EnergyTrack, seconds: number): Grid | undefined {
+  if (tempo.beats.length < 8) return undefined
+  const strongest = strongestLine(onsets, 60 / tempo.bpm)
+  if (!strongest) return undefined
+  let line = onTheBeat(strongest, low, seconds)
 
   // Kicks are looked for close to each predicted beat, so off-beat hits (a rolling bassline) aren't mistaken for them.
-  for (const tolerance of [0.06, 0.03, 0.03]) {
+  for (const tolerance of [0.03, 0.03, 0.02]) {
     const kicks = kicksOnGrid(line, onsets, seconds, Math.min(tolerance, line.period / 8))
     line =
       fitWithoutOutliers(
@@ -280,26 +281,61 @@ function beatGrid(tempo: TempoEstimate, onsets: Float32Array, seconds: number): 
   }
 }
 
-// music-tempo can follow an off-beat (a rolling bassline between the kicks), so the rough grid is shifted by a quarter,
-// half or three quarters of a beat if that lands it on more kick energy.
-function onTheKicks(line: Line, onsets: Float32Array): Line {
-  const secondsPerHop = hop / sampleRate
-  const reach = Math.round(line.period / 8 / secondsPerHop)
-  let best = line
-  let bestEnergy = -1
-  for (const shift of [0, 0.25, 0.5, 0.75]) {
-    const origin = line.origin + shift * line.period
-    let energy = 0
-    for (let time = origin - Math.floor(origin / line.period) * line.period; ; time += line.period) {
-      const centre = Math.round(time / secondsPerHop)
-      if (centre + reach >= onsets.length) break
-      let peak = 0
-      for (let i = Math.max(0, centre - reach); i <= centre + reach; i++) peak = Math.max(peak, onsets[i])
-      energy += peak
+// The beat line (seconds per beat and the time of a beat) through the most kick strength in the song, within ±4% of
+// music-tempo's tempo. music-tempo's own beats wander: a line through them was often 0.1–1% slow, and it sometimes
+// follows an off-beat bassline. Every sharp rise in the low end is a candidate kick; for each tempo tried (in steps of
+// 0.005%), they're folded onto one beat by their phase, and the 4 ms phase bin (with half its neighbours) holding the
+// most strength wins. Over a whole song, only the right tempo keeps the kicks in one bin.
+// The kicks or the off-beats: a rolling or sidechained bassline between the kicks can rise as sharply as the kicks
+// themselves, so the line through the most rises may be half a beat out. Kicks are the loudest hits in the low end, and
+// they jump further above what came just before, so the half of the beat where the low end is louder (summed in dB over
+// 40 ms) and rises more (from the 50 ms before) wins. Each is compared as a share of the two totals.
+function onTheBeat(line: Line, low: EnergyTrack, seconds: number): Line {
+  const totals = (origin: number): { level: number; rise: number } => {
+    let level = 0
+    let rise = 0
+    for (let time = origin - Math.floor(origin / line.period) * line.period; time + 0.04 < seconds; time += line.period) {
+      const after = Math.max(-100, low.db(time, time + 0.04))
+      level += after
+      rise += Math.max(0, after - Math.max(-100, low.db(time - 0.06, time - 0.01)))
     }
-    if (energy > bestEnergy) {
-      best = { origin, period: line.period }
-      bestEnergy = energy
+    return { level, rise }
+  }
+  const share = (a: number, b: number): number => (b - a) / (Math.abs(a) + Math.abs(b) || 1)
+  const on = totals(line.origin)
+  const off = totals(line.origin + line.period / 2)
+  return share(on.level, off.level) + share(on.rise, off.rise) > 0
+    ? { origin: line.origin + line.period / 2, period: line.period }
+    : line
+}
+
+function strongestLine(onsets: Float32Array, approxPeriod: number): Line | undefined {
+  const secondsPerHop = hop / sampleRate
+  const times: number[] = []
+  const strengths: number[] = []
+  for (let i = 1; i < onsets.length - 1; i++) {
+    if (onsets[i] >= candidateKick && onsets[i] >= onsets[i - 1] && onsets[i] > onsets[i + 1]) {
+      times.push(i * secondsPerHop)
+      strengths.push(onsets[i])
+    }
+  }
+  if (times.length < 8) return undefined
+  let best: Line | undefined
+  let bestScore = 0
+  for (let step = -tempoSearchSteps; step <= tempoSearchSteps; step++) {
+    const period = approxPeriod * (1 + step * tempoSearchStep)
+    const bins = Math.max(8, Math.round(period / phaseBinSeconds))
+    const folded = new Float64Array(bins)
+    for (let k = 0; k < times.length; k++) {
+      const phase = times[k] / period
+      folded[Math.floor((phase - Math.floor(phase)) * bins) % bins] += strengths[k]
+    }
+    for (let bin = 0; bin < bins; bin++) {
+      const score = folded[bin] + 0.5 * (folded[(bin + 1) % bins] + folded[(bin + bins - 1) % bins])
+      if (score > bestScore) {
+        bestScore = score
+        best = { origin: ((bin + 0.5) / bins) * period, period }
+      }
     }
   }
   return best
@@ -376,55 +412,53 @@ function kicksOnGrid(line: Line, onsets: Float32Array, seconds: number, toleranc
   return kicks.map(({ n, time, strength }) => ({ n, time, found: strength >= threshold }))
 }
 
-// Picks which beat starts the 16-bar phrases (one of the first 64 from the first kick): the one that puts the most
-// change in the music (the beat, the low end or the overall level coming or going) on bar lines, and then on phrase,
-// half-phrase and 4-bar lines. With no change at all, the first kick starts a phrase.
-function choosePhraseStart(grid: Grid, full: EnergyTrack, low: EnergyTrack, seconds: number): void {
+// Picks which beat starts the 16-bar phrases (one of the first 64 from the first kick). Dance music changes on bar
+// lines, so each beat gets evidence of being one: the kick coming back after a gap of 2 beats or more (by the gap's
+// length, up to 16), and the level stepping up or down from the beat before by 6 dB or more (summed over the full and
+// low bands, up to 40). The bar lines are the beats, every 4, with the most evidence; the sound starting on a beat
+// adds to them, and the first kick's beats get a fifth more (the kick usually comes in on beat 1). Then the phrase
+// starts on the bar whose phrase, half-phrase and 4-bar lines (weighted 4, 2 and 1) hold the most evidence. With no
+// evidence at all, the first kick starts a phrase.
+//
+// Checked against rekordbox's downbeats on 300 real tracks: 88% agree, against 84% for comparing 4-beat averages
+// (whose limited changes peaked a beat early or late) with the first kick's beats counting double.
+function choosePhraseStart(grid: Grid, full: EnergyTrack, low: EnergyTrack, seconds: number, soundStart: number): void {
   const beatTime = (i: number): number => grid.origin + (i + grid.low) * grid.period
   // Only beats that end before the end of the analysed audio, so a part-beat at the end doesn't look like silence.
   let count = grid.kicks.length
   while (count > 0 && beatTime(count) > seconds) count--
-  const fullDb = Array.from({ length: count }, (_, i) => clampDb(full.db(beatTime(i), beatTime(i + 1))))
-  const lowDb = Array.from({ length: count }, (_, i) => clampDb(low.db(beatTime(i), beatTime(i + 1))))
-  const kick = grid.kicks.slice(0, count).map((found) => (found ? 1 : 0))
-  // Before the start of the file counts as silence, so a song that opens on its beat starts a phrase there. Changes in
-  // level are smoothly limited to about 12 dB, so sound starting after silence doesn't outweigh every other change in
-  // the song, while the biggest change still peaks on the beat where it happens.
-  const average = (values: number[], from: number, to: number, before: number): number => {
-    let sum = 0
-    for (let i = from; i < to; i++) sum += i < 0 ? before : values[Math.min(i, count - 1)]
-    return sum / (to - from)
-  }
-  const difference = (values: number[], i: number, before: number, cap: number): number =>
-    cap * Math.tanh(Math.abs(average(values, i, i + 4, before) - average(values, i - 4, i, before)) / cap)
-  const change = Array.from(
-    { length: count },
-    (_, i) => difference(fullDb, i, -100, 12) + difference(lowDb, i, -100, 12) + 12 * difference(kick, i, 0, 1),
-  )
-  // Only clear changes count, once each, on the beat where they peak, by how far they stand out from the song's usual
-  // beat-to-beat variation (squared, so a few section changes outweigh many small ones).
-  const usual = 2 * percentile(change, 0.5)
-  const peaks = change.map((value, i) => {
-    for (let j = Math.max(0, i - 2); j <= Math.min(count - 1, i + 2); j++) {
-      if (change[j] > value || (j < i && change[j] === value)) return 0
+  const evidence = new Float64Array(count)
+  let gap = 0
+  for (let i = 0; i < count; i++) {
+    if (!grid.kicks[i]) gap++
+    else {
+      if (gap >= 2 && i > 0) evidence[i] += Math.min(gap, 16)
+      gap = 0
     }
-    return value
-  })
-  const novelty = peaks.map((value) => Math.max(0, value - usual) ** 2)
+  }
+  const level = (track: EnergyTrack, i: number): number => clampDb(track.db(beatTime(i), beatTime(i + 1)))
+  for (let i = 1; i < count; i++) {
+    const step = Math.abs(level(full, i) - level(full, i - 1)) + Math.abs(level(low, i) - level(low, i - 1))
+    if (step >= barStepDb) evidence[i] += Math.min(step, 40)
+  }
   const beatOf = (i: number, offset: number, length: number): number =>
     (((i + grid.low - offset) % length) + length) % length
-  // First the bar lines, then which of the 16 bars starts the phrase. Dance music almost always brings its kick in on
-  // the first beat of a bar, so the first kick starts a bar unless twice as much change falls on another beat.
-  const barLine = bestOffset(beatsPerBar, (offset) =>
-    novelty.reduce((score, value, i) => score + (beatOf(i, offset, beatsPerBar) === 0 ? value : 0), 0) *
-    (offset === 0 ? 2 : 1),
-  )
-  const phraseBar = bestOffset(beatsPerPhrase / beatsPerBar, (bar) =>
-    novelty.reduce((score, value, i) => {
+  const soundBeat = (soundStart - grid.origin) / grid.period
+  const soundOnBeat = Math.abs(soundBeat - Math.round(soundBeat)) < 0.15
+  const barLine = bestOffset(beatsPerBar, (offset) => {
+    let score = 0
+    for (let i = 0; i < count; i++) if (beatOf(i, offset, beatsPerBar) === 0) score += evidence[i]
+    if (soundOnBeat && (((Math.round(soundBeat) - offset) % beatsPerBar) + beatsPerBar) % beatsPerBar === 0) score += 30
+    return offset === 0 ? score * 1.2 : score
+  })
+  const phraseBar = bestOffset(beatsPerPhrase / beatsPerBar, (bar) => {
+    let score = 0
+    for (let i = 0; i < count; i++) {
       const beat = beatOf(i, barLine + bar * beatsPerBar, beatsPerPhrase)
-      return score + value * (beat === 0 ? 4 : beat === 32 ? 2 : beat % 16 === 0 ? 1 : 0)
-    }, 0),
-  )
+      score += evidence[i] * (beat === 0 ? 4 : beat === 32 ? 2 : beat % 16 === 0 ? 1 : 0)
+    }
+    return score
+  })
   grid.phrase = barLine + phraseBar * beatsPerBar
 }
 
@@ -450,8 +484,8 @@ interface Segment {
 }
 
 // The bar lines (counted from the phrase start) between the start and end of the analysed audio.
-function barLines(grid: Grid, full: EnergyTrack, low: EnergyTrack, seconds: number): number[] {
-  choosePhraseStart(grid, full, low, seconds)
+function barLines(grid: Grid, full: EnergyTrack, low: EnergyTrack, seconds: number, soundStart: number): number[] {
+  choosePhraseStart(grid, full, low, seconds, soundStart)
   const barLength = grid.period * beatsPerBar
   const firstBar = grid.origin + grid.phrase * grid.period
   const lines: number[] = []

@@ -69,7 +69,7 @@ If the code and this file disagree, the code wins: say so, and fix this file in 
 
 BPM and key belong to the **file** (every copy shares them); tempo belongs to the **playlist entry**. Explore and the library show the earliest-added copy, so their brackets use that copy's tempo. Full schema: `dba` agent.
 
-**Retrying:** `retryMissingTempos()` with `tempoDetectorVersion` (in `app_meta` as `tempo_detector`, currently 2). When detection improves, raise the version so rows with `tempo_read = 1 AND bpm IS NULL` are retried once. Rows saved before DJ details existed have `dj_read = 0`, so every such file is analysed once more and its `bpm` is rewritten from the beat grid (it can move by a fraction of a BPM). Keys have no equivalent yet; add a `keyDetectorVersion` the same way if key detection improves.
+**Retrying:** `retryMissingTempos()` with `tempoDetectorVersion` (in `app_meta` as `tempo_detector`, currently 2). When detection improves, raise the version so rows with `tempo_read = 1 AND bpm IS NULL` are retried once. Rows saved before DJ details existed have `dj_read = 0`, so every such file is analysed once more and its `bpm` is rewritten from the beat grid (it can move by a fraction of a BPM). `redetectRhythm()` with `rhythmDetectorVersion` (`app_meta.rhythm_detector`, currently 2) re-runs the whole rhythm pass (BPM and DJ details) on every file once when raised. Raise it when the grid changes, since the BPM comes from the grid. Keys have no equivalent yet; add a `keyDetectorVersion` the same way if key detection improves.
 
 ## Algorithms
 **BPM** (`trackRhythm.ts`, in the same pass as the DJ details):
@@ -80,7 +80,8 @@ BPM and key belong to the **file** (every copy shares them); tempo belongs to th
   - `initPeriod: 60` lets beats start up to a minute in (long intros).
   - `expiryTime: 90` keeps it following the beat through breakdowns. Its default of 10 s lost the beat in a 30 s breakdown and reported no tempo, or half-time.
 - When a beat grid is found, the BPM is the grid's exact BPM rounded to 0.1 (see the `dj` skill). Otherwise it's `music-tempo`'s tempo. Accepts 40–250 BPM, else undefined. `music-tempo` throwing (e.g. on silence) gives undefined.
-- Checked against 46 real dance tracks: grids on all those with a beat, and BPMs matching the old detector apart from its half-time and missed results.
+- The grid's tempo comes from searching ±4% around `music-tempo`'s for the tempo that lines up the most kicks across the whole song. A line through `music-tempo`'s own beats was 0.1–1.3% slow on two-thirds of real tracks.
+- Checked against rekordbox's grids on 200 real tracks: within 0.02 BPM on 180, against 65 before the search (see the `dj` skill, "Accuracy").
 - Type declarations are in `src/main/music-tempo.d.ts`.
 
 **Key** (`trackKey.ts`):

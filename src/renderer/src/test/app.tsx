@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect } from 'vitest'
 import type { DjDetails } from '../../../shared/djDetails'
@@ -26,6 +26,12 @@ export async function renderApp(playlists: { title: string; songs?: SongSpec[] }
 
 let current: FakeDesktop
 
+/** Closes the app and opens it again, keeping what it remembers on this computer (the volume, DJ mode). */
+export async function relaunch(playlists: { title: string; songs?: SongSpec[] }[]): Promise<AppHarness> {
+  cleanup()
+  return renderApp(playlists)
+}
+
 // The deck playing the current song (the other deck only plays during a DJ-mode mix).
 function audio(): HTMLAudioElement {
   return document.querySelector<HTMLAudioElement>('audio[data-deck="live"]')!
@@ -36,18 +42,37 @@ function songOn(deck: HTMLAudioElement): string | undefined {
   return id ? current.titleOf(Number(id)) : undefined
 }
 
+export interface HeardSong {
+  volume: number
+  speed: number
+  bass: boolean
+  /** Only while a DJ-mode filter is sweeping the song: its lows going (high-pass) or its highs (low-pass). */
+  filter?: 'high-pass' | 'low-pass'
+}
+
 /**
- * Every song you can hear right now, by title: how loud (0–100), how fast (percent of normal speed) and whether its
- * bass is in (DJ mode cuts one song's bass while two play). Songs playing silently aren't heard.
+ * Every song you can hear right now, by title: how loud (0–100), how fast (percent of normal speed), whether its
+ * bass is in (DJ mode cuts one song's bass while two play), and any filter sweeping it. Songs playing silently aren't
+ * heard.
  */
-export function heard(): Record<string, { volume: number; speed: number; bass: boolean }> {
-  const songs: Record<string, { volume: number; speed: number; bass: boolean }> = {}
+export function heard(): Record<string, HeardSong> {
+  const songs: Record<string, HeardSong> = {}
   for (const deck of document.querySelectorAll('audio')) {
-    const volume = deck.muted ? 0 : Math.round(deck.volume * 100)
+    // Through Web Audio (once DJ mode has been on): filters (which have a frequency), then a gain.
+    let bassDb = 0
+    let level = 1
+    let filter: HeardSong['filter']
+    for (let node = globalThis.testDeckGraphs.get(deck)?.next; node; node = node.next) {
+      const { gain, frequency, type } = node as unknown as { gain?: { value: number }; frequency?: { value: number }; type?: string }
+      if (type === 'lowshelf') bassDb = gain!.value
+      else if (type === 'highpass' && frequency!.value > 40) filter = 'high-pass'
+      else if (type === 'lowpass' && frequency!.value < 10000) filter = 'low-pass'
+      else if (!frequency && gain) level *= gain.value
+    }
+    const volume = deck.muted ? 0 : Math.round(deck.volume * level * 100)
     const song = songOn(deck)
     if (deck.paused || volume === 0 || !song) continue
-    const bassDb = globalThis.testBassFilters.get(deck)?.gain.value ?? 0
-    songs[song] = { volume, speed: Math.round(deck.playbackRate * 1000) / 10, bass: bassDb > -6 }
+    songs[song] = { volume, speed: Math.round(deck.playbackRate * 1000) / 10, bass: bassDb > -6, ...(filter && { filter }) }
   }
   return songs
 }

@@ -30,6 +30,7 @@ export class PlaylistDatabase {
     store.initializeSchema()
     store.migrateSchema()
     store.retryMissingTempos()
+    store.redetectRhythm()
     store.removeOrphanedTracks()
     store.seedStarterPlaylists()
     store.persist()
@@ -397,6 +398,15 @@ export class PlaylistDatabase {
     this.run('INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)', ['tempo_detector', String(tempoDetectorVersion)])
   }
 
+  // When the beat grid or phrase detection improves, every file is analysed again, once per version. Its old tempo and
+  // DJ details stay until the new ones arrive.
+  private redetectRhythm(): void {
+    const saved = this.query<{ value: string }>('SELECT value FROM app_meta WHERE key = ?', ['rhythm_detector'])[0]
+    if (Number(saved?.value ?? 1) >= rhythmDetectorVersion) return
+    this.run('UPDATE playlist_tracks SET dj_read = 0 WHERE dj_read = 1')
+    this.run('INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)', ['rhythm_detector', String(rhythmDetectorVersion)])
+  }
+
   private seedStarterPlaylists(): void {
     const seeded = this.query<{ value: string }>('SELECT value FROM app_meta WHERE key = ?', [
       'starter_playlists_seeded',
@@ -424,6 +434,11 @@ export class PlaylistDatabase {
 // Raise this when tempo detection gets better at finding tempos, so songs it missed before are tried again.
 // 2: finds beats that start after a long intro.
 const tempoDetectorVersion = 2
+
+// Raise this when the beat grid, phrase start or other DJ details are found differently, so every file is analysed
+// again. 2: the tempo from the kicks across the whole song, kicks rather than an off-beat bassline, and bar lines from
+// where the kick returns and the level changes.
+const rhythmDetectorVersion = 2
 
 const nextPlaylistPosition = '(SELECT COALESCE(MAX(position), -1) + 1 FROM playlists)'
 

@@ -109,40 +109,46 @@ Object.defineProperties(HTMLMediaElement.prototype, {
   },
 })
 
-// jsdom has no Web Audio. DJ mode only uses it for each deck's bass (a low-shelf filter fed by the deck's <audio>),
-// so this stand-in records each element's filter, which tests read through `testBassFilters` to hear the bass.
+// jsdom has no Web Audio. DJ mode only uses it for each deck's bass, sweep filters and level (the deck's <audio> feeds a
+// low-shelf, a high-pass and a low-pass filter, then a gain), so this stand-in records what each element is connected to, which tests read through
+// `testDeckGraphs` to hear the bass and level. Changes take effect at once.
 class FakeAudioParam {
-  value = 0
+  constructor(public value = 0) {}
   setTargetAtTime(value: number): this {
     this.value = value
     return this
   }
 }
 class FakeAudioNode {
-  connect<T>(destination: T): T {
+  next: FakeAudioNode | null = null
+  connect<T extends FakeAudioNode>(destination: T): T {
+    this.next = destination
     return destination
   }
 }
 declare global {
   // eslint-disable-next-line no-var
-  var testBassFilters: WeakMap<HTMLMediaElement, { gain: FakeAudioParam }>
+  var testDeckGraphs: WeakMap<HTMLMediaElement, FakeAudioNode>
 }
-globalThis.testBassFilters = new WeakMap()
+globalThis.testDeckGraphs = new WeakMap()
 class FakeAudioContext {
   currentTime = 0
+  state = 'running'
   destination = new FakeAudioNode()
   resume(): Promise<void> {
     return Promise.resolve()
   }
-  createBiquadFilter(): FakeAudioNode & { type: string; frequency: FakeAudioParam; gain: FakeAudioParam } {
-    return Object.assign(new FakeAudioNode(), { type: '', frequency: new FakeAudioParam(), gain: new FakeAudioParam() })
+  sampleRate = 48000
+  createBiquadFilter(): FakeAudioNode & { type: string; frequency: FakeAudioParam; gain: FakeAudioParam; Q: FakeAudioParam } {
+    const params = { frequency: new FakeAudioParam(350), gain: new FakeAudioParam(), Q: new FakeAudioParam(1) }
+    return Object.assign(new FakeAudioNode(), { type: 'lowpass', ...params })
+  }
+  createGain(): FakeAudioNode & { gain: FakeAudioParam } {
+    return Object.assign(new FakeAudioNode(), { gain: new FakeAudioParam(1) })
   }
   createMediaElementSource(element: HTMLMediaElement): FakeAudioNode {
     const source = new FakeAudioNode()
-    source.connect = <T,>(filter: T): T => {
-      globalThis.testBassFilters.set(element, filter as unknown as { gain: FakeAudioParam })
-      return filter
-    }
+    globalThis.testDeckGraphs.set(element, source)
     return source
   }
 }

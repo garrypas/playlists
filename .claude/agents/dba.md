@@ -82,6 +82,7 @@ Key/value table (`key TEXT PRIMARY KEY, value TEXT NOT NULL`) for one-off app st
 |---|---|
 | `starter_playlists_seeded` | `'1'` once the four starter playlists were created, so deleting them doesn't bring them back |
 | `tempo_detector` | Last `tempoDetectorVersion` applied by `retryMissingTempos()` (currently 2) |
+| `rhythm_detector` | Last `rhythmDetectorVersion` applied by `redetectRhythm()` (currently 2; missing counts as 1) |
 
 ### Mapping to TypeScript
 The window sees two reads: `list()`, and `getDjDetails(trackId)` (over `playlists:dj-details`, for DJ mode, one song at a time). The `list()` `SELECT` aliases columns to the camelCase `Playlist` / `PlaylistTrack` fields in `src/shared/playlist.ts`, with tracks ordered `position, id`. `added_at`, `created_at`, `playlists.position` and the `*_read` flags are not exposed. A column the window needs must be added to that `SELECT` and to the type.
@@ -92,9 +93,10 @@ The window sees two reads: `list()`, and `getDjDetails(trackId)` (over `playlist
 2. `initializeSchema()`: original tables.
 3. `migrateSchema()`: add missing `playlist_tracks` columns from the `added` map; add `playlists.position` (set to `id`).
 4. `retryMissingTempos()`: if `app_meta.tempo_detector` < `tempoDetectorVersion`, reset `tempo_read` to 0 where `bpm IS NULL`, and record the version.
-5. `removeOrphanedTracks()`: delete tracks whose playlist is gone (older builds lost foreign keys after the first save).
-6. `seedStarterPlaylists()`: once ever, in a transaction.
-7. `persist()`.
+5. `redetectRhythm()`: if `app_meta.rhythm_detector` < `rhythmDetectorVersion`, reset `dj_read` to 0 on every row, and record the version. `bpm` and `dj_details` stay until `saveRhythm` replaces them.
+6. `removeOrphanedTracks()`: delete tracks whose playlist is gone (older builds lost foreign keys after the first save).
+7. `seedStarterPlaylists()`: once ever, in a transaction.
+8. `persist()`.
 
 Then `index.ts` saves tags for `filesNeedingTags()`, creates the window, and starts the scanners on `filesNeedingRhythm()` (`tempo_read = 0 OR dj_read = 0`) and `filesNeedingKey()` (`key_read = 0`): each file once, however many playlists it's in, in order of `MIN(id)`. `saveRhythm` writes `bpm`, `dj_details` and both flags together.
 

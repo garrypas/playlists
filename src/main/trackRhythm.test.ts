@@ -17,6 +17,25 @@ const structured = [
   { bars: 32, kick: true, pad: true },
   { bars: 8, pad: true, level: 0.05 },
 ]
+// 138.7 BPM trance, DJ-friendly: 16 bars of kick alone, then a sidechained bassline on every off-beat (rising more
+// sharply than the kick, but quieter), a breakdown of the bassline alone, the kick and bassline again, and a 16-bar
+// outro of kick alone.
+const trance = [
+  { bars: 16, kick: true },
+  { bars: 32, kick: true, offbeatBass: true },
+  { bars: 16, offbeatBass: true },
+  { bars: 64, kick: true, offbeatBass: true },
+  { bars: 16, kick: true },
+]
+// 126 BPM, after 1 s of silence: 16 bars of pad alone, 16 bars where the kick comes in on the third beat, an 8-bar
+// breakdown, then 32 bars with the kick back on the bar line.
+const beat126 = 60 / 126
+const lateKick = [
+  { bars: 16, pad: true },
+  { bars: 16, kick: true, pad: true, kickFromBeat: 2 },
+  { bars: 8, pad: true },
+  { bars: 32, kick: true, pad: true },
+]
 
 beforeAll(() => {
   music = mkdtempSync(join(tmpdir(), 'playlists-rhythm-'))
@@ -25,6 +44,8 @@ beforeAll(() => {
   writeFileSync(file('intro.wav'), beat(124, 30, { introSeconds: 20 }))
   writeFileSync(file('structured.wav'), song(126, structured, { silenceSeconds: 1 }))
   writeFileSync(file('six-minutes.wav'), song(128, [{ bars: 192, kick: true, pad: true }]))
+  writeFileSync(file('trance.wav'), song(138.7, trance))
+  writeFileSync(file('late-kick.wav'), song(126, lateKick, { silenceSeconds: 1 }))
   writeFileSync(file('silence.wav'), silence())
   writeFileSync(file('not-audio.mp3'), 'This is not audio.')
 })
@@ -91,6 +112,20 @@ describe('finding what a DJ needs to mix a song', () => {
     expect(dj.drops[0]).toBeCloseTo(barLine(32), 1)
     expect(dj.grid?.confidence).toBeGreaterThan(0.9)
     expect(dj.analysedSeconds).toBeCloseTo(barLine(72), 1)
+  })
+
+  it('puts the grid on the kicks, not on an off-beat bassline that rises more sharply', async () => {
+    const { grid } = (await detectRhythm(file('trance.wav'))).dj
+    expect(grid?.bpm).toBeCloseTo(138.7, 2)
+    expect(grid?.firstBeat).toBeCloseTo(0, 2)
+    expect(grid?.phraseStart).toBeCloseTo(0, 2)
+  })
+
+  it('starts phrases on the bar lines where the music changes, not on a kick that comes in mid-bar', async () => {
+    const { grid } = (await detectRhythm(file('late-kick.wav'))).dj
+    expect(grid?.firstBeat).toBeCloseTo(1 + 66 * beat126, 1)
+    // The first 16-bar line after the first kick, where the breakdown starts.
+    expect(grid?.phraseStart).toBeCloseTo(1 + 128 * beat126, 1)
   })
 
   it('measures how loud the song is, ignoring silence and quiet parts', async () => {

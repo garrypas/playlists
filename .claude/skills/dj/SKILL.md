@@ -11,7 +11,7 @@ A DJ makes one continuous set out of separate songs. The craft comes down to fou
 3. **Structure:** their phrases line up, so a 16-bar section of one song overlaps a 16-bar section of the other.
 4. **Transition:** how the outgoing song gives way to the incoming one. This can be a long blend, a quick fade, a bass swap or a drop mix.
 
-**Status: DJ mode is built as an automix.** It's off by default and toggled by a button in the player.
+**Status: DJ mode is built as an automix.** It's off by default, toggled by a button in the player, and remembered between launches.
 - Every file's DJ details (beat grid, phrase start, sections, drops, loudness, sound bounds) are found in the background and saved per file; see "DJ details (built)".
 - While DJ mode is on, each song mixes into the next on a second `<audio>` deck; see "DJ mode (built)".
 - This file holds the domain rules, what's built and what's left.
@@ -39,7 +39,7 @@ If the code and this file disagree, the code wins: say so, and fix this file in 
 
 | `src/renderer/src/dj/djMix.ts` | Pure maths: `matchRate`, `keyAtRate`, `keysCompatible`, `planTransition`, `levelsAt`, `incomingTimeAt` / `outgoingTimeAt`, `nudgedRate`, `transitionName`; types `Deck`, `TransitionPlan`, `MixLevels` |
 | `src/renderer/src/dj/djMix.test.ts` | The maths, by musical behavior |
-| `src/renderer/src/dj/deckEq.ts` | Each deck's bass filter (Web Audio); see `audio-engine` |
+| `src/renderer/src/dj/deckEq.ts` | Each deck's bass filter, high-pass and low-pass sweep filters, and mix-level gain (Web Audio); see `audio-engine` |
 | `src/renderer/src/djMode.test.tsx` | DJ mode as the user hears and sees it |
 | `src/shared/musicalKey.ts` | `camelotCode(key)` ("8A", "8B", …), next to the key spellings |
 
@@ -92,7 +92,8 @@ Every transition starts on a **downbeat**, and usually on the **outgoing song's 
 | **Blend** (long mix) | Incoming starts on its intro's first phrase at the outgoing outro's phrase boundary. It fades in, the bass swaps at the midpoint downbeat, then the outgoing song fades out | 16–32 bars total: fade-in 8, bass swap at bar 8 or 16, fade-out 8 | Both songs have mixable intro/outro, matched tempo, compatible keys |
 | **Bass swap** (part of a blend) | Both songs play together with the incoming song's lows cut. On one downbeat, its lows come in as the outgoing song's lows drop out | Instant, or over 1 beat | Always in a blend: two basslines together sound muddy |
 | **Drop mix** (drop swap) | Incoming starts early enough that its build-up runs under the outgoing song. On the outgoing phrase boundary, the outgoing song cuts and the incoming drop hits | Build lead: 8 or 16 bars before the drop | High energy, songs with a clear drop, keys may clash |
-| **Cut** (slam) | Outgoing stops on a phrase-end downbeat and incoming starts on its phrase start (or its drop) at the same moment | 0 | Tempo out of range, clashing keys, a change of genre |
+| **Cut** (slam) | Outgoing stops on a phrase-end downbeat and incoming starts on its phrase start (or its drop) at the same moment | 0 | Tempo out of range, clashing keys, a change of genre. Sounds abrupt in an automix; prefer a filter fade |
+| **Filter fade** | Outgoing high-pass sweeps up (bass, then body, gone) to a phrase line. Into a beatless intro, the incoming song fades in under it with its low-pass opening; into a beat, it comes in on the line | 2–4 bars | Beats to non-beats, or beats that can't be matched |
 | **Quick fade** | Equal-power crossfade, not beatmatched or on the beat | 1–2 bars, or 2–4 s if the BPM is unknown | When nothing else fits; also the fallback with no BPM |
 | **Echo-out** (later) | The outgoing song's last beat feeds an echo timed to the beat while it fades, then incoming starts | 1–2 bars of tail | Clashing tempo or key. Needs a delay node |
 
@@ -153,19 +154,41 @@ wall-clock time = now + (boundary − t) / rate
 
 **Algorithms** (`trackRhythm.ts`):
 1. **Decode** once at 11,025 Hz mono, with no ffmpeg filter. Energy is summed in 32-sample hops (2.9 ms), with running totals, so the level of any span costs O(1).
-2. **Tempo:** `music-tempo` on a 500 Hz low-pass (see `tempo-and-key` for its parameters).
+2. **Rough tempo:** `music-tempo` on a 500 Hz low-pass (see `tempo-and-key` for its parameters). Only its tempo is used, as the centre of the search in step 4. Its beats wander: a line through them was 0.1–1.3% slow on two-thirds of real tracks.
 3. **Kicks:** a further 150 Hz low-pass. Kick strength at each hop is `ln(energy of the next 4 hops / energy of the 4 before)`, with silence before the file. Four hops (11.6 ms) is the shortest window that doesn't see a held bass note's own cycles as kicks.
 4. **Grid:**
-   - Number `music-tempo`'s beats by the periods between them, and fit a line (least squares, refitted without points more than 50 ms off).
-   - Shift it by ¼, ½ or ¾ of a beat if that lands on more kick energy (`music-tempo` sometimes follows a rolling off-beat bassline).
-   - Refine three times: at every predicted beat, take the strongest kick within 60, then 30 ms, placed between hops with a parabola. Refit through the kicks above the threshold, dropping any more than 20 ms off.
+   - **Tempo and phase search** (`strongestLine`): every local peak of kick strength ≥ 0.5 is a candidate kick. For each tempo within ±4% of music-tempo's, in steps of 0.005%, the candidates are folded onto one beat by phase into 4 ms bins. The bin (plus half of each neighbour) with the most total strength wins. Only the right tempo keeps a whole song's kicks in one bin. About 0.1 s per song.
+   - **Kicks or off-beats** (`onTheBeat`): a sidechained or rolling bassline on the off-beat can rise more sharply than kicks that hit over a held bass, so the search can land half a beat out. The two halves of the beat are compared by the low band's level over the 40 ms after each beat (summed dB), and by how far it rises from the 50 ms before (from −60 to −10 ms). Each comparison is `(b − a) / (|a| + |b|)`, and the half with the larger sum of the two wins. Kicks are the loudest hits in the low end.
+   - Refine three times: at every predicted beat, take the strongest kick within 30, 30, then 20 ms, placed between hops with a parabola. Refit through the kicks above the threshold, dropping any more than 20 ms off.
    - The threshold is a log ratio of a third of the 75th-percentile strength, clamped to 0.5–0.8. 0.8 is a kick that doubles the energy over a held bass note.
-5. **Phrase start:**
-   - Each beat's change is the difference between the 4 beats after and the 4 before, in full-band dB, low-band dB (each smoothly limited to about 12 dB with `tanh`) and the share of kicks (×12).
-   - Only local peaks count, by how far they stand out above twice the median change, squared.
-   - Choose the bar line first: offsets 0–3 from the first kick, where offset 0 counts double (dance music brings the kick in on beat 1). Then choose which of the 16 bars starts the phrase, with weights 4, 2 and 1 for changes on the phrase, half-phrase and quarter-phrase lines.
-   - On 30 real tracks, 27 put it on the first kick's bar lines.
+5. **Phrase start** (`choosePhraseStart`):
+   - **Evidence per beat** that a bar starts there:
+     - the kick coming back after a gap of 2 beats or more, weighted by the gap (up to 16);
+     - the level stepping by `barStepDb` (6 dB) or more from the beat before, summed over the full and low bands, weighted by the step (up to 40).
+   - **Bar line:** offsets 0–3 from the first kick, each scored by the evidence on its beats. Add 30 if the sound starts within 0.15 beat of one of its beats, and give offset 0 (the first kick) 1.2×.
+   - **Phrase:** which of the 16 bars, weighting evidence on the phrase, half-phrase and 4-bar lines 4, 2 and 1.
+   - The old measure compared 4-beat averages, with differences limited by `tanh`. Big changes saturated, so they peaked a beat early or late. The first kick also counted double, though a quarter of real tracks bring it in on beat 2, 3 or 4.
 6. **Sections and drops:** as in the table above. A single odd bar between two of the same kind is folded into them (a missed kick or a one-bar fill).
+
+**Accuracy, checked against rekordbox.** The reference is the beat grids in your library's `ANLZ0000.DAT` files, read-only, which number each beat 1–4 within its bar. The sample is 200 tracks never used for tuning:
+
+| | Before | After |
+|---|---|---|
+| Tempo within 0.02 BPM of rekordbox | 65 | 180 |
+| Same bar lines as rekordbox | 61 | 134 |
+| Grid on the off-beat | 37 | 20 |
+| Right beats, but the wrong one as bar 1 | 50 | 18 |
+| Same tempo, beats 50–170 ms apart (unresolved: the two detectors choose different hits) | 52 | 28 |
+
+- Where the grids agree, the median offset is 0 ms.
+- Rekordbox has no phrase analysis or cue points in this library, so which of the 16 bars starts the phrase is untested on real music.
+- **To repeat the check:**
+  1. Parse `PQTZ` (beat number, tempo × 100, time in ms) from `~/Library/Pioneer/rekordbox/share/PIONEER/USBANLZ/*/*/ANLZ0000.DAT`.
+  2. Match files by the file name in `PPTH`.
+  3. Run the built `out/main/analysisWorker.js` (`kind: 'rhythm'`) on the matching files.
+- Compare downbeats over the whole song, not near the first kick. Many intros fade in from noise, and a rounded rekordbox tempo drifts away from the real one.
+
+**Re-detection:** `rhythmDetectorVersion` (`app_meta.rhythm_detector`, currently 2) resets `dj_read` on every file once when raised. Files keep their old BPM and DJ details until the new ones arrive. Raise it whenever the grid, phrases or sections are found differently.
 
 **Speed:**
 - About 1 s for a 6-minute song and 1.5 s for 10½ minutes, on an Apple Silicon Mac. That's checked on 46 real tracks, and a test requires a 6-minute song to take under 5 s.
@@ -174,8 +197,9 @@ wall-clock time = now + (boundary − t) / rate
 
 ## DJ mode (built)
 **Engine: two media elements**, the old option A.
-- Two `<audio>` decks stream from `playlist-audio:` as before, and levels are set on each element's `volume`.
-- Bass goes through a lowshelf filter per deck: 200 Hz, cut to −30 dB, in one `AudioContext` (`dj/deckEq.ts`), created on the first click of the DJ-mode button. That needs CORS on the scheme; see `audio-engine` "Platform facts".
+- Two `<audio>` decks stream from `playlist-audio:` as before. The player's volume stays on each element's `volume`.
+- Each deck goes through a lowshelf filter (200 Hz, cut to −30 dB) and then a `GainNode` for its mix level, in one `AudioContext` (`dj/deckEq.ts`). This is set up the first time DJ mode is on, including at launch when it was left on. That needs CORS on the scheme; see `audio-engine` "Platform facts".
+- Mix levels go on the gain with `setTargetAtTime` (0.015 s time constant). Setting `element.volume` every 50 ms stepped the level 20 times a second, which buzzes ("zipper noise"). Without Web Audio (`createDeckEq` returned null), `setDeckLevel` falls back to `element.volume`.
 - Normal playback is unchanged on the live deck.
 - Option B (decoded buffers, sample-exact starts, ~10 MB per minute) was not chosen.
 
@@ -187,16 +211,31 @@ wall-clock time = now + (boundary − t) / rate
   - Keys are compared at their played speeds (`keyAtRate`, rounded to a semitone) with `keysCompatible`: the same code, ±1 with the same letter, or the same number with the other letter. Unknown → undefined.
 - **Mix-out line:** the last line every N bars from `phraseStart`, at or before the end of the last bar of beats (`lastBeat` + 1 beat, capped at `soundEnd`/duration).
 - **Order of preference:**
-  1. **Blend** of 16 bars (8 if a key is unknown) when the keys don't clash. It ends on the mix-out line for that length. The incoming song starts at its `phraseStart`, so phrase meets phrase. Swap halfway. Falls to 8 bars if 16 has passed or doesn't fit the incoming song.
-  2. **Drop mix** when the keys clash: the first drop with a full 16 (else 8) bars of beats before it. The incoming song starts `bars` bars before its drop, so the drop lands on the 16-bar mix-out line. Swap there; the outgoing song fades out over one beat.
-  3. **Cut** on the 16-bar mix-out line, or the next bar line if that has passed. Beatmatched if the tempos matched, else at the incoming song's own saved rate.
-  4. **Fade** (no usable grids): equal power over the last 2 bars by the song's BPM, or 3 s, ending at `soundEnd`/duration. The incoming song starts from its `soundStart` at its own rate.
+  1. **Blend** whenever the tempos match: 16 bars, or 8 when the keys clash (they overlap for less time). It ends on the mix-out line for that length. The incoming song starts at its `phraseStart`, so phrase meets phrase. Swap halfway. Falls to 8 bars if 16 has passed or doesn't fit the incoming song.
+     - Blending on a clash was the user's call: with random keys only about 1 pair in 6 is compatible, so cutting on a clash meant cutting almost every time.
+  2. **Filter fade** onto the 16-bar mix-out line (needs only the outgoing grid). It lasts 4 bars, or 2 if 4 have passed.
+     - **Into a song that opens without a beat** (no usable grid, or `soundStart` at least 4 of its bars before `firstBeat`): the incoming song starts from `soundStart` at the start of the sweep and swaps halfway.
+     - **Into a beat:** `sweepFrom` is 4 bars before the line, and the incoming song starts at its `phraseStart` on the line. `startAt = swapAt = endAt`, like a cut.
+  3. **Cut** on the next bar line, only when it's too late for a filter fade (e.g. after seeking near the end).
+  4. **Fade** (the outgoing song has no usable grid): over the last 2 bars by the song's BPM, or 3 s, ending at `soundEnd`/duration. The incoming song starts from its `soundStart` at its own rate.
   - Null in the last half second.
-- Every plan has `startAt` (incoming comes in), `incomingFrom`, `incomingRate`, `ratio` (incoming file seconds per outgoing file second = incomingRate ÷ outgoing rate), `beatmatched`, `swapAt` and `endAt`.
+  - The drop mix was removed. With clashing keys blending first, its window always fell inside the 8-bar blend's, so it could never be chosen. `drops` are still detected.
+- Every plan has:
+  - `startAt` (incoming comes in) and `sweepFrom` (the transition starts being heard; earlier than `startAt` only in a filter fade into a beat);
+  - `incomingFrom`, `incomingRate` and `ratio` (incoming file seconds per outgoing file second = incomingRate ÷ outgoing rate);
+  - `beatmatched`, `swapAt` and `endAt`.
 - **Levels** (`levelsAt`):
   - **Blend:** an equal-power crossfade over its whole length (`cos`/`sin`), so the decks are at about 0.71 each at the swap. Bass is cut on the incoming deck before the swap and on the outgoing deck after.
-  - **Drop:** the build-up rises to 0.7 without bass; at the drop it's 1 with bass, and the outgoing song goes to 0 within a beat.
-  - **Cut:** instant. **Fade:** an equal-power crossfade, no bass changes.
+  - **Filter:** `outHighPass` goes 0 → 1 from `sweepFrom` to `endAt`.
+    - Into a beat, the outgoing level stays at 1 (the filter does the fading) and the incoming song comes in at full on the line.
+    - Into a beatless intro, the levels follow the fade's `cos²` curve (summing to 1), and `inLowPass` goes 1 → 0.
+  - **Cut:** instant.
+  - `outHighPass` and `inLowPass` (0 open, 1 closed) are 0 everywhere else.
+  - `deckEq` maps them to cutoffs, evenly in octaves:
+    - high-pass 10 Hz → 2 kHz;
+    - low-pass 20 kHz → 200 Hz;
+    - Q 1 dB, glided with a 0.02 s time constant.
+  - **Fade:** `out = cos²(x·π/2)` and `in = 1 − out`, so the levels always sum to 1 (0.5 each halfway). Two unmatched songs can't peak past full scale together; equal power (0.71 each) with both basslines in clipped audibly. The basslines swap halfway, as in a blend.
 
 **The runner** (`App.tsx`: `djTick`, `loadIncoming`, `startIncoming`, `swapDecks`, `endMix`):
 - **Ticks** run on every `timeupdate` and every 50 ms while a mix exists and is playing.
@@ -205,7 +244,8 @@ wall-clock time = now + (boundary − t) / rate
 - **Start:** the incoming deck starts silently up to 2 s early (the preroll; less if `incomingFrom` is near 0). A `setTimeout` is timed from the live deck. If the start is late, it's placed where it should be.
 - **Phase:** each tick, the following deck (the one that isn't live) is compared with where the plan says it should be. The error, smoothed (0.7/0.3), sets its rate through `nudgedRate`: 4 ms dead band; up to ±1.5% while it's audible, ±5% while it's silent. The live deck is never nudged.
 - **Swap:** at `swapAt`, `swapDecks` checks that `nextUp(false)` is still the incoming song. It flips `liveDeck` and sets `djTempo` to the incoming rate as a percent (unrounded). It takes the step with `leaveFor` (the queue or the list) and sets `activeTrack`. Effects then see the song already loaded on the new live deck and don't reload it.
-- **End:** at `endAt` (or when the outgoing song ends), `endMix` pauses the outgoing deck and restores full level and bass.
+- **Sweep before the start:** in the planned phase, once the outgoing song reaches `sweepFrom`, its level, bass and high-pass are applied, so a filter fade into a beat sweeps before the incoming deck starts.
+- **End:** at `endAt` (or when the outgoing song ends), `endMix` pauses the outgoing deck and restores full level and bass, and opens both decks' filters.
 - **Re-planning:** an effect re-plans whenever there's no mix. A mix is dropped (`endMix`) when any of these happen:
   - DJ mode is turned off, or playback pauses.
   - The current song changes (not by the swap) or the next song changes.
@@ -215,7 +255,7 @@ wall-clock time = now + (boundary − t) / rate
 - **Tempo:** `tempo` in `App` is `djTempo` while it's for the current song, else the song's saved tempo. That's how "the playing song's tempo is the DJ's starting tempo" works. `changeTempo` does nothing in DJ mode, and the slider is `aria-disabled`.
 
 **UI:** a headphones button left of Shuffle ("DJ mode", `aria-pressed`). A `role="status"` line (`.dj-status`) sits under the progress bar:
-- "DJ: 16-bar blend into Two at 3:44" (planned, with the outgoing song's time)
+- "DJ: 16-bar blend into Two at 3:44" (planned, with the outgoing song's time at `sweepFrom`)
 - "DJ: mixing into Two (16-bar blend)"
 - "DJ: mixing out of One"
 - "DJ: next up, Two" (waiting for details)
@@ -227,8 +267,9 @@ wall-clock time = now + (boundary − t) / rate
 - echo-out;
 - a choice of transition or length;
 - easing the set tempo back towards each song's own BPM;
-- ordering by BPM or key;
-- remembering whether DJ mode is on.
+- ordering by BPM or key.
+
+**Remembered:** whether DJ mode is on, in `localStorage` under `djMode` (`'on'` or `'off'`), like the volume. `savedDjMode` reads it when the window opens.
 
 ## Product decisions
 Settled (the user asked for DJ mode off by default and toggled in the UI, with the tempo control off while it's on and the DJ starting from the playing song's tempo; the rest were the recommended defaults, recorded in `product.md`):
@@ -236,13 +277,18 @@ Settled (the user asked for DJ mode off by default and toggled in the UI, with t
 2. **Tempo isn't saved.** The matched speed holds for the rest of the song; turning DJ mode off restores saved tempos.
 3. **Engine:** option A, two elements, with CORS on `playlist-audio:` (see `security.md` rule 16).
 4. **Shuffle:** DJ mode follows the shuffle order; it doesn't reorder.
-5. **Default transition:** a 16-bar blend; a drop mix on a key clash.
+5. **Default transition:** a 16-bar blend; an 8-bar blend on a key clash. When the beats can't be matched, a filter fade rather than a cut (the user found cuts unnatural).
 
-Open: cue points (detected only, or user-editable? per file or per playlist entry?), and whether to remember DJ mode between launches.
+6. **DJ mode is remembered** between launches (the user asked).
+
+Open: cue points (detected only, or user-editable? per file or per playlist entry?).
 
 ## Tests
 **Built** (`src/main/trackRhythm.test.ts`, "finding what a DJ needs to mix a song", real ffmpeg decoding of generated WAVs):
 - grids at 120 and 128 BPM starting at the first kick
+- a grid on the kicks, not on an off-beat bassline that rises more sharply (fails with the old ¼/½/¾ shift)
+- a phrase start on the bar line where the music changes, not on a kick that comes in on beat 3 (fails with the old phrase rule)
+- Synthetic audio can't reproduce music-tempo's tempo drift: it's exact on clean beats, even with jittered kicks. So the tempo search is checked against rekordbox (above).
 - 5 ms phase accuracy over 64 bars
 - the first kick and phrase after a beatless intro
 - silence, beat, a 30 s breakdown, the drop and a quiet outro on bar lines
@@ -250,7 +296,12 @@ Open: cue points (detected only, or user-editable? per file or per playlist entr
 - a silent song
 - a 6-minute song analysed in under 5 s
 
-`playlistDatabase.test.ts` "DJ details" covers one scan per file, sharing and copying to new copies, songs saved before DJ details, and unknown songs.
+`playlistDatabase.test.ts` "DJ details" covers:
+- one scan per file;
+- sharing, and copying to new copies;
+- songs saved before DJ details;
+- one re-scan after `rhythmDetectorVersion` rises, keeping the old details until then;
+- unknown songs.
 
 **DJ mode:**
 - `src/renderer/src/dj/djMix.test.ts` covers:
@@ -258,12 +309,13 @@ Open: cue points (detected only, or user-editable? per file or per playlist entr
   - Camelot codes and compatibility, with keys compared after the shift;
   - every plan type and its fallbacks (shorter blends, the next bar line, a loose grid, a file longer than its analysis);
   - phase within 1 ms over 64 bars;
-  - equal-power levels and the bass swap.
+  - equal-power blend levels and the bass swap;
+  - fade levels that never sum past 1, with the basslines swapped.
 - `src/renderer/src/djMode.test.tsx` tests through `heard()`, `player()` and `djStatus()`:
-  - off by default, and the tempo lock;
+  - off by default, still on (and mixing) after `relaunch()`, and the tempo lock;
   - a 16-bar blend (levels, bass, speed, the swap, the end);
   - matching the playing song's saved tempo;
-  - a drop mix, a cut and a quick fade;
+  - an 8-bar blend on a key clash; a filter fade into a beat (the outgoing song filtered out first) and into a beatless intro (both filtered, overlapping, never louder together than one song); a quick fade;
   - mixing into the queue;
   - pausing mid-mix and re-planning shorter, skipping mid-mix, turning DJ mode off mid-mix;
   - the last song;
@@ -276,19 +328,24 @@ Open: cue points (detected only, or user-editable? per file or per playlist entr
 ## Pitfalls
 - **Half or double time** is the most common reason a beatmatch fails. Always try ×2 and ÷2.
 - **Grid timing:** kicks over a held bass note are placed about 10 ms after their true start (the onset window has to be 11.6 ms long), and kicks after silence within about 1 ms. Two decks share the bias, so beatmatching is fine. When starting a deck exactly on a kick, start about 15 ms early (on silence or the bar before) so the attack isn't clipped.
-- **Phrase start is a heuristic.** It's right on most dance tracks but can be a bar or a beat off (about 1 in 10 in a sample). A wrong phrase is worse than none, so let the user correct it before DJ mode depends on it for long blends.
+- **Phrase start is a heuristic.** Its bar lines match rekordbox's on about 9 in 10 tracks whose grids agree, but nothing confirms which of the 16 bars starts the phrase. A wrong phrase is worse than none, so let the user correct it before DJ mode depends on it for long blends.
+- **Don't tune detection on synthetic audio alone.** Every grid bug fixed so far showed up only on real tracks. Check changes with the rekordbox comparison above.
 - **music-tempo parameters:** `timeStep` must match the hop length, and `expiryTime` must outlast breakdowns (see `tempo-and-key`). Changing the sample rate or hop means changing both.
 - **File time vs wall-clock time:** grid positions are in file time; scheduling is in `AudioContext` time. Divide by the rate when converting, and recalculate when the rate changes mid-transition.
 - **Pitch moves with tempo.** A match that is fine for tempo can create a key clash, so check keys after the shift.
 - **Detection only covers the first 20 minutes** (`analysedSeconds`), so a grid for a longer song has to be extrapolated. Songs with live drums, tempo changes or no beat in the intro or outro (ambient, a cappella) won't hold a grid. Detect this (high spread around the fitted line) and treat them as having no grid.
 - **The intro may have no beat:** `first_beat` can be late. Don't start the incoming song before its first beat in a beatmatched blend.
 - **Two basslines** at full level sound muddy. In a blend, always cut one song's lows.
-- **Clipping:** two full-level songs summed can exceed 0 dBFS. Use equal-power gains, and possibly a master compressor or limiter.
+- **Clipping:** two full-level songs summed can exceed 0 dBFS.
+  - Unmatched songs (the fade) use levels that sum to 1.
+  - A blend keeps equal power (0.71 each at the swap), which is safe only because one bassline is cut.
+  - There's no limiter, because it would also change normal playback: Chromium's `DynamicsCompressorNode` adds make-up gain.
 - **Media element drift:** two elements started "together" drift apart and their starts vary. The runner corrects it by nudging the following deck's rate, never by seeking once it's audible. Don't nudge the live deck: the tempo effect owns its rate.
 - **State in `App.tsx`:** `activeTrack` and `resumeFrom` are indices and `queue` is IDs (see `audio-engine` "Pitfalls"). `activeTrack` moves only at the swap, through `nextUp`/`leaveFor`, the same as `advance`. Anything new that changes what plays next must let the invalidation effect see it, or a mix will swap to a song that's no longer next. `swapDecks` checks this too.
 - **Stale closures:** timers and intervals call `djTickRef.current` and read `mixRef`/`liveDeckRef`, never state captured when they were scheduled.
 - **Tempo saves:** DJ tempo lives in `djTempo`, never in `changeTempo` (that saves to the database). Keep it unrounded: rounding to 0.1% drifts about 10 ms every 4 bars.
-- **A cut ends where it starts** (`endAt === startAt`). Any "has this mix been missed?" check must allow for that.
+- **A cut ends where it starts** (`endAt === startAt`), and so does a filter fade into a beat. Any "has this mix been missed?" check must allow for that.
+- **A low-pass keeps the kick.** Never overlap an unmatched incoming beat under a low-pass "to hide it": the lows are exactly what clashes. That's why a filter fade into a beat waits for the line.
 
 ## Keeping this file current
 When DJ mode changes, update this file in the same task.

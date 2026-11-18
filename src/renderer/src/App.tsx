@@ -110,6 +110,7 @@ const DJ_PREROLL_SECONDS = 2
 const DJ_TICK_MS = 50
 
 const VOLUME_KEY = 'volume'
+const DJ_MODE_KEY = 'djMode'
 
 // How long the tempo control waits for the user to stop adjusting before saving, so a drag isn't saved at every step.
 const TEMPO_SAVE_DELAY_MS = 300
@@ -127,6 +128,15 @@ function withTempos(playlists: Playlist[], tempos: ReadonlyMap<number, number>):
     ...playlist,
     tracks: playlist.tracks.map((track) => (tempos.has(track.id) ? { ...track, tempo: tempos.get(track.id)! } : track)),
   }))
+}
+
+// Whether DJ mode was on last time; off if it was never set or can't be read.
+function savedDjMode(): boolean {
+  try {
+    return localStorage.getItem(DJ_MODE_KEY) === 'on'
+  } catch {
+    return false
+  }
 }
 
 // The volume from last time (0–1), or full volume if it was never set or can't be read.
@@ -164,7 +174,7 @@ function App() {
   // The track id loaded on each deck, so swapping decks doesn't reload the song that's already playing.
   const deckTrackIds = useRef<(number | null)[]>([null, null])
   const deckEq = useRef<DeckEq | null | undefined>(undefined)
-  const [djMode, setDjMode] = useState(false)
+  const [djMode, setDjMode] = useState(savedDjMode)
   // The speed DJ mode plays the current song at (percent, unrounded so beats stay matched); not saved.
   const [djTempo, setDjTempo] = useState<{ trackId: number; percent: number } | null>(null)
   // What's known about each file for mixing, by file path: undefined while loading, null if nothing is known yet.
@@ -273,8 +283,8 @@ function App() {
     for (const deck of [deckA.current, deckB.current]) if (deck) deck.muted = muted
     const audio = liveAudio()
     if (!audio) return
-    if (mixRef.current && mixRef.current.phase !== 'planned') djTickRef.current()
-    else audio.volume = volume
+    audio.volume = volume
+    if (mixRef.current) djTickRef.current()
   }, [volume, muted])
 
   // Loading a new song resets the speed to the default, so both are set to the playing song's tempo.
@@ -294,6 +304,19 @@ function App() {
       // Not remembering the volume is fine.
     }
   }, [volume])
+
+  // DJ mode is remembered between launches. While it's on, both decks play through their level and bass controls
+  // (routed once, the first time; it can't be undone).
+  useEffect(() => {
+    try {
+      localStorage.setItem(DJ_MODE_KEY, djMode ? 'on' : 'off')
+    } catch {
+      // Not remembering DJ mode is fine.
+    }
+    if (djMode && deckEq.current === undefined && deckA.current && deckB.current) {
+      deckEq.current = createDeckEq([deckA.current, deckB.current])
+    }
+  }, [djMode])
 
   useEffect(() => {
     const audio = liveAudio()
@@ -319,6 +342,7 @@ function App() {
     const audio = liveAudio()
     if (!audio || !currentTrack) return
     if (playing) {
+      deckEq.current?.resume()
       // AbortError just means the source changed mid-load; the next play() call takes over.
       audio.play().catch((error: unknown) => {
         if (!(error instanceof DOMException && error.name === 'AbortError')) setPlaying(false)
@@ -399,6 +423,17 @@ function App() {
     setMixState(next)
   }
 
+  // A deck's level in a mix (0–1, times the volume): on its gain, which glides between updates, or, without Web Audio,
+  // on the element.
+  function setDeckLevel(deck: HTMLAudioElement, level: number): void {
+    if (deckEq.current) {
+      deckEq.current.setLevel(deck, level)
+      deck.volume = volume
+    } else {
+      deck.volume = Math.min(1, Math.max(0, level)) * volume
+    }
+  }
+
   // Stops a mix straight away: before the swap the incoming song stops; after it, the outgoing one does.
   function endMix(): void {
     const current = mixRef.current
@@ -409,11 +444,12 @@ function App() {
     const live = liveAudio()
     const other = otherAudio()
     other?.pause()
-    if (live) {
-      live.volume = volume
-      deckEq.current?.setBass(live, 1)
+    for (const deck of [live, other]) {
+      if (!deck) continue
+      setDeckLevel(deck, 1)
+      deckEq.current?.setBass(deck, 1)
+      deckEq.current?.setFilters(deck, 0, 0)
     }
-    if (other) deckEq.current?.setBass(other, 1)
     setMix(null)
   }
 
@@ -423,8 +459,10 @@ function App() {
     const otherDeck = liveDeckRef.current === 0 ? 1 : 0
     if (!other) return
     const { plan } = current
-    other.volume = 0
-    deckEq.current?.setBass(other, levelsAt(plan, plan.startAt).inLows)
+    setDeckLevel(other, 0)
+    const atStart = levelsAt(plan, plan.startAt)
+    deckEq.current?.setBass(other, atStart.inLows)
+    deckEq.current?.setFilters(other, 0, atStart.inLowPass)
     if (deckTrackIds.current[otherDeck] !== current.incomingId) {
       other.src = `playlist-audio://track/${current.incomingId}`
       deckTrackIds.current[otherDeck] = current.incomingId
@@ -493,17 +531,25 @@ function App() {
         const outgoingRate = plan.incomingRate / plan.ratio
         runner.startTimer = setTimeout(startIncoming, Math.max(0, ((rollAt - time) / outgoingRate) * 1000))
       }
+      // A filter fade into a beat sweeps the outgoing song away before the incoming one starts.
+      if (time >= plan.sweepFrom) {
+        const levels = levelsAt(plan, time)
+        setDeckLevel(live, levels.outLevel)
+        deckEq.current?.setBass(live, levels.outLows)
+        deckEq.current?.setFilters(live, levels.outHighPass, 0)
+      }
       return
     }
 
     const outgoing = swapped ? other : live
     const incoming = swapped ? live : other
     const levels = levelsAt(plan, time)
-    const level = (value: number): number => Math.min(1, Math.max(0, value)) * volume
-    outgoing.volume = level(levels.outLevel)
-    incoming.volume = level(levels.inLevel)
+    setDeckLevel(outgoing, levels.outLevel)
+    setDeckLevel(incoming, levels.inLevel)
     deckEq.current?.setBass(outgoing, levels.outLows)
     deckEq.current?.setBass(incoming, levels.inLows)
+    deckEq.current?.setFilters(outgoing, levels.outHighPass, 0)
+    deckEq.current?.setFilters(incoming, 0, levels.inLowPass)
 
     // The deck that isn't live follows the live one's beat.
     if (plan.beatmatched && !other.paused) {
@@ -596,12 +642,8 @@ function App() {
     }
   })
 
-  // Turning DJ mode on routes both decks through their bass controls (once; it can't be undone) and hands the tempo
-  // to the DJ. Turning it off gives each song its own tempo back.
+  // Turning DJ mode on hands the tempo to the DJ. Turning it off gives each song its own tempo back.
   function toggleDjMode(): void {
-    if (!djMode && deckEq.current === undefined && deckA.current && deckB.current) {
-      deckEq.current = createDeckEq([deckA.current, deckB.current])
-    }
     if (djMode) setDjTempo(null)
     setDjMode(!djMode)
   }
@@ -1028,7 +1070,7 @@ function App() {
   const djStatus = (() => {
     const titleOf = (id: number): string => playingTracks.find((track) => track.id === id)?.title ?? 'the next song'
     if (mix?.phase === 'planned') {
-      return `DJ: ${transitionName(mix.plan)} into ${titleOf(mix.incomingId)} at ${formatDuration(Math.floor(mix.plan.startAt))}`
+      return `DJ: ${transitionName(mix.plan)} into ${titleOf(mix.incomingId)} at ${formatDuration(Math.floor(mix.plan.sweepFrom))}`
     }
     if (mix?.phase === 'running') return `DJ: mixing into ${titleOf(mix.incomingId)} (${transitionName(mix.plan).toLowerCase()})`
     if (mix?.phase === 'swapped') return `DJ: mixing out of ${titleOf(mix.outgoingId)}`

@@ -461,6 +461,24 @@ describe('DJ details', () => {
     expect(db.getDjDetails(db.list()[1].tracks[0].id)).toEqual(rhythm(126).dj)
   })
 
+  it('are found again, once, after detection improves, keeping the old ones until then', async () => {
+    db.addAudioFiles(db.list()[0].id, ['/music/a.mp3'])
+    db.saveRhythm('/music/a.mp3', rhythm(127.9))
+    db.close()
+    const sqlJs = await initSqlJs()
+    const old = new sqlJs.Database(readFileSync(join(userData, 'playlists.sqlite3')))
+    old.run(`DELETE FROM app_meta WHERE key = 'rhythm_detector'`)
+    writeFileSync(join(userData, 'playlists.sqlite3'), old.export())
+    db = await openPlaylistDatabase(userData)
+    expect(db.filesNeedingRhythm()).toEqual(['/music/a.mp3'])
+    expect(db.list()[0].tracks[0].bpm).toBe(127.9)
+    expect(db.getDjDetails(db.list()[0].tracks[0].id)).toEqual(rhythm(127.9).dj)
+    db.saveRhythm('/music/a.mp3', rhythm(128))
+    await reopen()
+    expect(db.filesNeedingRhythm()).toEqual([])
+    expect(db.list()[0].tracks[0].bpm).toBe(128)
+  })
+
   it('are unknown for a song that does not exist', () => {
     expect(db.getDjDetails(999)).toBeNull()
   })

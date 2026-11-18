@@ -9,7 +9,7 @@ Playlists plays audio with **two HTML `<audio>` elements ("decks") in the render
 - The **live deck** plays the current song. The other deck is used only by DJ mode, to play the next song into the current one.
 - Without DJ mode, only deck 0 is ever live.
 - There's no playback library.
-- When DJ mode is first turned on, both decks are routed, permanently, through a small Web Audio graph: one bass filter per deck (`dj/deckEq.ts`). Elements still do the playing.
+- The first time DJ mode is on (a click, or at launch if it was left on), both decks are routed, permanently, through a small Web Audio graph: per deck, a bass filter, high-pass and low-pass sweep filters (wide open except in a filter fade) and a mix-level gain (`dj/deckEq.ts`). Elements still do the playing.
 - Mixing logic lives in the `dj` skill. BPM and key analysis decode audio separately in main with ffmpeg; that path is never used for playback. For detection, and for how BPM and key are shown at a changed tempo, load the `tempo-and-key` skill.
 
 If the code and this file disagree, the code wins: say so, and fix this file in the same task.
@@ -25,7 +25,7 @@ If the code and this file disagree, the code wins: say so, and fix this file in 
 | File | Role |
 |---|---|
 | `src/renderer/src/App.tsx` | The two `<audio>` decks (in the player footer; `crossOrigin="anonymous"`, `data-deck="live"` on the live one), all playback state, the effects that drive the live deck, every playback action, DJ mode's runner (see the `dj` skill), and the player bar's DJ-mode button, seek, tempo and volume sliders |
-| `src/renderer/src/dj/deckEq.ts` | `createDeckEq(elements)`: routes both decks through a lowshelf `BiquadFilterNode` each, in one `AudioContext`; `setBass(element, 0–1)`. Null without Web Audio |
+| `src/renderer/src/dj/deckEq.ts` | `createDeckEq(elements)`: routes each deck through a lowshelf, a highpass (10 Hz open) and a lowpass (20 kHz open) `BiquadFilterNode`, then a `GainNode`, in one `AudioContext`. `setBass(element, 0–1)`, `setFilters(element, highPass 0–1, lowPass 0–1)` (high-pass up to 2 kHz, low-pass down to 200 Hz, evenly in octaves), `setLevel(element, 0–1)` (glides with a 0.015 s time constant, so 50 ms updates don't zipper) and `resume()`. Null without Web Audio |
 | `src/renderer/src/trackDisplay.ts` | Pure helpers: `librarySongs`, `libraryAlbums`, `libraryArtists` (Explore/library play lists), `formatDuration`; BPM/key formatting is owned by `tempo-and-key` |
 | `src/renderer/src/SongTable.tsx`, `ExploreView.tsx`, `LibraryView.tsx` | Song lists that call back into `App`'s play actions (`playFrom`, `playLibrary`); `LibrarySource` type |
 | `src/renderer/src/TrackArt.tsx` | Artwork from `playlist-audio://artwork/<id>`, falling back to an icon |
@@ -50,13 +50,13 @@ If the code and this file disagree, the code wins: say so, and fix this file in 
 | `volume` (0–1), `muted` | `volume` saved in `localStorage` under `volume`; muting isn't saved |
 | `tempo` (derived) | In DJ mode, `djTempo.percent` when it's for `currentTrack` (unrounded, so beats stay matched); otherwise `currentTrack?.tempo ?? 0`, read from `playlists` (saved values with `unsavedTempos` laid over them; see "Tempo control") |
 | `liveDeck: 0 \| 1` (+ `liveDeckRef`) | Which deck plays the current song; it changes only at a DJ-mode swap. `deckTrackIds` (ref) holds the track ID loaded on each deck |
-| `djMode`, `djTempo`, `mix`, `djDetails` | DJ mode (off at launch), its unsaved tempo, the planned or running transition, and fetched DJ details by file path (see the `dj` skill) |
+| `djMode`, `djTempo`, `mix`, `djDetails` | DJ mode (saved in `localStorage` under `djMode` as `'on'`/`'off'`; off the first time), its unsaved tempo, the planned or running transition, and fetched DJ details by file path (see the `dj` skill) |
 
-Nothing else survives a restart: no last song, position, queue or shuffle. Tempo is saved to the database per playlist entry.
+Nothing else survives a restart: no last song, position, queue or shuffle. The `[djMode]` effect saves DJ mode and, while it's on, creates the deck graph the first time. Tempo is saved to the database per playlist entry.
 
 ## How the decks are driven
 Effects act on the **live deck** (`liveAudio()`), in this order (the order matters):
-1. `[volume, muted]`: sets `muted` on both decks. The live deck's `volume` is set here, unless a mix is running, in which case the DJ runner sets both decks' volumes.
+1. `[volume, muted]`: sets `muted` on both decks. The live deck's `volume` is set here, unless a mix is running, in which case the DJ runner sets both decks' levels through `setDeckLevel`: the mix level on the deck's gain and the volume on the element, or both on the element without Web Audio.
 2. `[tempo, currentTrack?.id, liveDeck]`: `preservesPitch = false`, `defaultPlaybackRate` and `playbackRate` = `1 + tempo / 100`. It must come before effect 4, because loading a new `src` resets the rate to `defaultPlaybackRate`.
 3. `[volume]`: saves the volume to `localStorage`.
 4. `[currentTrack?.id, liveDeck]`:
@@ -108,9 +108,11 @@ Verified and in use (Electron 36 / Chromium):
 - `preservesPitch = true` makes music stutter in Chromium, so tempo moves pitch like a turntable (+10% is about 1.6 semitones). Key lock needs a real time-stretch library (e.g. SoundTouch) on a Web Audio path.
 - **Web Audio on `playlist-audio:`** was checked in Electron 36 with a hidden sandboxed window: an element with `crossOrigin="anonymous"` on the scheme, registered `corsEnabled` and answering `Access-Control-Allow-Origin: *`.
   - It plays, and `createMediaElementSource` hears it (RMS 0.347 for a 220 Hz sine at −6 dBFS).
-  - The element's `volume` scales what Web Audio receives exactly (0.25 → a quarter), and `muted` makes it silent, so DJ mode sets levels on the elements.
-  - A lowshelf filter's gain works on it. Without CORS the source node outputs silence.
-- The `AudioContext` runs without a click (Electron's autoplay policy), but it's created from the DJ-mode button's click anyway.
+  - The element's `volume` scales what Web Audio receives exactly (0.25 → a quarter), and `muted` makes it silent.
+  - A lowshelf filter's gain works on it, and so does a `GainNode` with `setTargetAtTime` (0.5 → half). Without CORS the source node outputs silence.
+  - Highpass and lowpass sweeps work on it too: a highpass at 2 kHz takes a 220 Hz tone from 0.347 to 0.004. Wide open (10 Hz highpass, 20 kHz lowpass, Q 1) the level is unchanged (0.346), so normal playback isn't coloured.
+- The `AudioContext` is `running` as soon as it's created, with no click (Electron's autoplay policy). That's why DJ mode can set it up at launch. Playing calls `resume()` anyway.
+- Setting `element.volume` takes effect without smoothing, so changing it every 50 ms during a fade buzzes ("zipper noise"). Mix levels go on the deck's gain.
 
 Not verified; check in `npm run dev` before relying on them:
 - **Formats:** the dialog accepts mp3, m4a, aac, wav, aiff, flac, ogg and opus, but decoding is up to Chromium. AIFF in particular may not play; an unplayable file shows the error alert.
@@ -123,10 +125,17 @@ Not verified; check in `npm run dev` before relying on them:
 
 ## Tests
 - jsdom can't play media. `src/renderer/src/test/setup.ts` replaces `HTMLMediaElement` members: `play`/`pause` flip `paused`; `load` pauses and rewinds; setting `src` rewinds, clears `duration` and resets `playbackRate` to `defaultPlaybackRate`; `currentTime`, `duration`, `playbackRate`, `defaultPlaybackRate` and `preservesPitch` are stored. Any new element property or method you use must be added there, behaving like the real one.
-- It also installs a minimal `AudioContext`. It supports `createMediaElementSource`, `createBiquadFilter`, `destination` and `resume`, and the filter's `gain.setTargetAtTime` jumps straight to its target. Each element's filter is recorded in `globalThis.testBassFilters`, which `heard()` reads.
+- It also installs a minimal `AudioContext`.
+  - It supports `createMediaElementSource`, `createBiquadFilter`, `createGain`, `destination`, `state` and `resume`.
+  - `setTargetAtTime` jumps straight to its target.
+  - Each node records what it's connected to (`next`), and each element's source is in `globalThis.testDeckGraphs`. `heard()` walks that chain: a node with a `frequency` is the bass filter, and any other gain multiplies the element's volume.
 - Helpers in `test/app.tsx`:
   - `player()` → `{ song, playing, time, volume, speed, keepsPitch }`. It's read from the **live** deck; `speed` is a percentage, e.g. 110.
-  - `heard()` → `{ [title]: { volume, speed, bass } }` for every deck playing above zero volume.
+  - `heard()` → `{ [title]: { volume, speed, bass, filter? } }` for every deck playing above zero volume.
+    - `volume` is the element's volume times the deck's gain.
+    - `filter` is `'high-pass'` (cutoff above 40 Hz) or `'low-pass'` (below 10 kHz), and is present only while one is audibly engaged.
+    - The fake filters tell themselves apart by `type`.
+  - `relaunch(playlists)` closes the app and opens it again with the same `localStorage` (the volume, DJ mode).
   - `playTo(seconds)` moves the live deck and also advances any other playing deck by the same real time, at its own speed, as real playback would.
   - DJ helpers: `djModeButton()`, `djStatus()`, `djTrack(bpm, { bars, firstBeat, phraseStart, drops })` (a `DjDetails` for song specs).
   - Also: `expectPlaying(title)`, `songLoaded(seconds)`, `playTo(seconds)`, `songEnds()`, `songFailsToLoad()`, `playerButton('Play' | 'Pause' | 'Next' | 'Previous' | 'Shuffle')`, `songButton(title)`, `songRow(title)`, `artworkButton(title)`, `volumeLeftAt(percent)`, `tempoSlider()`, `pressOnTempo(...keys)`, `queuePanel()`, `queueContents()`, `queueButton()`.

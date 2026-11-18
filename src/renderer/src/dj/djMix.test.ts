@@ -93,37 +93,50 @@ describe('planning a transition', () => {
     expect(plan.startAt).toBe(224)
   })
 
-  it('keeps the blend short when a key is unknown', () => {
-    expect(planTransition(deck(outgoing, { key: 'Am' }), deck(track(120, 64)), 10)).toMatchObject({ kind: 'blend', bars: 8, startAt: 240 })
+  it('blends over 16 bars when a key is unknown', () => {
+    expect(planTransition(deck(outgoing, { key: 'Am' }), deck(track(120, 64)), 10)).toMatchObject({ kind: 'blend', bars: 16, startAt: 224 })
   })
 
-  it('drop-mixes a clashing key, so the drop lands as the outgoing song stops', () => {
-    const plan = planTransition(deck(outgoing, { key: 'Am' }), deck(track(120, 64, { drops: [64] }), { key: 'F#' }), 10)!
-    expect(plan).toMatchObject({ kind: 'drop', bars: 16, startAt: 224, incomingFrom: 32, swapAt: 256 })
-    expect(levelsAt(plan, 240)).toMatchObject({ outLevel: 1, inLows: 0 })
-    expect(levelsAt(plan, 256)).toMatchObject({ inLevel: 1, inLows: 1, outLevel: 1 })
-    expect(levelsAt(plan, plan.endAt).outLevel).toBe(0)
-  })
-
-  it('cuts on the last phrase when the keys clash and there is no drop', () => {
+  it('still blends when the keys clash, over 8 bars so they overlap for less time', () => {
     expect(planTransition(deck(outgoing, { key: 'Am' }), deck(track(120, 64), { key: 'F#' }), 10)).toMatchObject({
-      kind: 'cut',
-      startAt: 256,
+      kind: 'blend',
+      bars: 8,
+      startAt: 240,
       beatmatched: true,
     })
-  })
-
-  it('cuts at the next song’s own speed when the tempos are 15% apart', () => {
-    const plan = planTransition(deck(outgoing), deck(track(140, 64), { rate: 1.03 }), 10)!
-    expect(plan).toMatchObject({ kind: 'cut', startAt: 256, incomingRate: 1.03, beatmatched: false })
   })
 
   it('makes a shorter blend when the song is already past the 16-bar mix-in point', () => {
     expect(planTransition(deck(outgoing, { key: 'Am' }), deck(track(120, 64), { key: 'Am' }), 230)).toMatchObject({ kind: 'blend', bars: 8, startAt: 240 })
   })
 
-  it('cuts on the last phrase line when it’s too late for any blend', () => {
-    expect(planTransition(deck(outgoing), deck(track(120, 64)), 250.2)).toMatchObject({ kind: 'cut', startAt: 256 })
+  it('filters the playing song out over its last 4 bars, then brings in a next song that opens on its beat', () => {
+    // 15% apart: the beats can't be matched, so they mustn't overlap.
+    const plan = planTransition(deck(outgoing), deck(track(140, 64), { rate: 1.03 }), 10)!
+    expect(plan).toMatchObject({ kind: 'filter', bars: 4, sweepFrom: 248, startAt: 256, endAt: 256, incomingRate: 1.03, beatmatched: false })
+    expect(levelsAt(plan, 240)).toMatchObject({ outLevel: 1, outHighPass: 0, inLevel: 0 })
+    expect(levelsAt(plan, 252)).toMatchObject({ outLevel: 1, outHighPass: 0.5, inLevel: 0 })
+    expect(levelsAt(plan, 256)).toMatchObject({ outLevel: 0, inLevel: 1, inLowPass: 0 })
+  })
+
+  it('fades a next song that opens without a beat in under the playing one, filtering both', () => {
+    // 20 s of pad before the first kick, and a tempo too far away to match.
+    const padIntro = { ...track(140, 64, { firstBeat: 20 }), soundStart: 0.2 }
+    const plan = planTransition(deck(outgoing), deck(padIntro), 10)!
+    expect(plan).toMatchObject({ kind: 'filter', bars: 4, sweepFrom: 248, startAt: 248, swapAt: 252, endAt: 256, incomingFrom: 0.2 })
+    expect(levelsAt(plan, 248)).toMatchObject({ outLevel: 1, outHighPass: 0, inLevel: 0, inLowPass: 1 })
+    const halfway = levelsAt(plan, 252)
+    expect(halfway).toMatchObject({ outHighPass: 0.5, inLowPass: 0.5 })
+    expect(halfway.outLevel + halfway.inLevel).toBeCloseTo(1, 6)
+    expect(levelsAt(plan, 256)).toMatchObject({ outLevel: 0, inLevel: 1, inLowPass: 0 })
+  })
+
+  it('treats a next song with no beat at all as opening without one', () => {
+    expect(planTransition(deck(outgoing), deck(null, { duration: 300 }), 10)).toMatchObject({ kind: 'filter', startAt: 248, incomingFrom: 0 })
+  })
+
+  it('makes the filter fade 2 bars when 4 have passed', () => {
+    expect(planTransition(deck(outgoing), deck(track(140, 64)), 249)).toMatchObject({ kind: 'filter', bars: 2, sweepFrom: 252 })
   })
 
   it('cuts on the next bar line once the last phrase line has passed', () => {
@@ -133,9 +146,18 @@ describe('planning a transition', () => {
   it('fades quickly over the last 3 seconds when there is no beat grid', () => {
     const plan = planTransition(deck(null, { duration: 200 }), deck(null), 10)!
     expect(plan).toMatchObject({ kind: 'fade', startAt: 197, endAt: 200, swapAt: 198.5, incomingFrom: 0 })
-    // Equal power: halfway, each is at about 71%, so the overall level doesn't dip.
-    const halfway = levelsAt(plan, 198.5)
-    expect(halfway.outLevel ** 2 + halfway.inLevel ** 2).toBeCloseTo(1, 6)
+  })
+
+  it('never plays two unmatched songs louder together than either alone, nor both basslines at once', () => {
+    const plan = planTransition(deck(null, { duration: 200 }), deck(null), 10)!
+    for (let time = 196; time <= 200; time += 0.25) {
+      const { outLevel, inLevel } = levelsAt(plan, time)
+      expect(outLevel + inLevel).toBeLessThanOrEqual(1 + 1e-9)
+    }
+    expect(levelsAt(plan, 197)).toMatchObject({ outLevel: 1, outLows: 1, inLevel: 0, inLows: 0 })
+    expect(levelsAt(plan, 198)).toMatchObject({ outLows: 1, inLows: 0 })
+    expect(levelsAt(plan, 198.5)).toMatchObject({ outLevel: expect.closeTo(0.5, 6), inLevel: expect.closeTo(0.5, 6), outLows: 0, inLows: 1 })
+    expect(levelsAt(plan, 200)).toMatchObject({ outLevel: expect.closeTo(0, 6), inLevel: 1 })
   })
 
   it('fades over the last 2 bars when the BPM is known but the beat is too loose to mix on', () => {
@@ -156,7 +178,7 @@ describe('blend levels', () => {
   const plan = planTransition(deck(track(120, 128), { key: 'Am' }), deck(track(120, 64), { key: 'Am' }), 10)!
 
   it('brings the next song in without its bass, then swaps basslines halfway', () => {
-    expect(levelsAt(plan, 200)).toEqual({ outLevel: 1, outLows: 1, inLevel: 0, inLows: 0 })
+    expect(levelsAt(plan, 200)).toEqual({ outLevel: 1, outLows: 1, outHighPass: 0, inLevel: 0, inLows: 0, inLowPass: 0 })
     const quarter = levelsAt(plan, 232)
     expect(quarter.outLevel).toBeCloseTo(Math.cos(Math.PI / 8), 6)
     expect(quarter.inLevel).toBeCloseTo(Math.sin(Math.PI / 8), 6)

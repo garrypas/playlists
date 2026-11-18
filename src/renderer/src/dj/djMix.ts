@@ -17,7 +17,7 @@ export interface Deck {
   details: DjDetails | null
 }
 
-export type TransitionKind = 'blend' | 'drop' | 'cut' | 'fade'
+export type TransitionKind = 'blend' | 'filter' | 'cut' | 'fade'
 
 /**
  * How the playing (outgoing) song hands over to the next (incoming) one. Every moment is in the outgoing song's file
@@ -25,8 +25,13 @@ export type TransitionKind = 'blend' | 'drop' | 'cut' | 'fade'
  */
 export interface TransitionPlan {
   kind: TransitionKind
-  /** The blend's length, or a drop mix's lead before the drop, in bars; 0 for a cut or a fade. */
+  /** The blend's or filter fade's length in bars; 0 for a cut or a quick fade. */
   bars: number
+  /**
+   * When the transition starts to be heard: `startAt`, except in a filter fade into a song that opens on its beat,
+   * where the outgoing song filters out for a few bars before the incoming one comes in.
+   */
+  sweepFrom: number
   /** When the incoming song comes in. */
   startAt: number
   /** Where in the incoming song it comes in (its file time at `startAt`). */
@@ -43,12 +48,18 @@ export interface TransitionPlan {
   endAt: number
 }
 
-/** How loud each deck is (0–1) and whether its bass is in (0 cut, 1 full), at one moment of a transition. */
+/**
+ * How loud each deck is (0–1), whether its bass is in (0 cut, 1 full), and how far its sweep filter is closed (0 open,
+ * 1 fully closed), at one moment of a transition. The outgoing song's filter is a high-pass (sweeping up, taking the
+ * bass and then the body away); the incoming song's is a low-pass (opening up from a muffled sound).
+ */
 export interface MixLevels {
   outLevel: number
   outLows: number
+  outHighPass: number
   inLevel: number
   inLows: number
+  inLowPass: number
 }
 
 /** Grids below this confidence don't hold a beat well enough to mix on. */
@@ -57,8 +68,10 @@ const MIN_GRID_CONFIDENCE = 0.5
 const MIN_LEAD_SECONDS = 1
 /** A quick fade's length when there's no beat to count bars in. */
 const FADE_SECONDS = 3
-/** In a drop mix, how loud the incoming build-up plays under the outgoing song. */
-const DROP_BUILD_LEVEL = 0.7
+/** A filter fade's lengths to try, in the outgoing song's bars. */
+const FILTER_BARS = [4, 2]
+/** An incoming song with at least this many bars before its first kick opens without a beat. */
+const BEATLESS_INTRO_BARS = 4
 
 export function secondsPerBeat(bpm: number): number {
   return 60 / bpm
@@ -124,12 +137,13 @@ function nextBarLine(grid: BeatGrid, time: number): number {
 /**
  * Plans how `outgoing` hands over to `incoming`, with `now` the outgoing song's current file time. In order of
  * preference:
- * - a phrase-matched **blend** over the outgoing song's last 16 bars (8 when either key is unknown), when the tempos
- *   match within ±10% and the keys mix;
- * - a **drop mix** when the keys clash and the incoming song has a drop: its build-up runs under the outgoing song's
- *   last 16 (or 8) bars and the drop lands as the outgoing song stops;
- * - a **cut** on the outgoing song's last phrase line (beatmatched if the tempos match);
- * - a **quick fade** at the end when either song has no beat grid.
+ * - a phrase-matched **blend** over the outgoing song's last 16 bars when the tempos match within ±10%, or its last 8
+ *   when the keys clash (or 16 doesn't fit);
+ * - a **filter fade** onto the outgoing song's last phrase line when the beats can't be matched: its high-pass sweeps
+ *   up over 4 (or 2) bars. An incoming song that opens without a beat fades in over the same bars, its low-pass
+ *   opening; one that opens on its beat comes in on the line, so two unmatched beats never play together;
+ * - a **cut** on the next bar line when it's too late for anything else;
+ * - a **quick fade** at the end when the outgoing song has no beat grid.
  * Returns null when the outgoing song is too near its end to mix at all.
  */
 export function planTransition(outgoing: Deck, incoming: Deck, now: number): TransitionPlan | null {
@@ -138,48 +152,49 @@ export function planTransition(outgoing: Deck, incoming: Deck, now: number): Tra
   const inGrid = usableGrid(incoming.details)
   const earliest = now + MIN_LEAD_SECONDS
 
-  if (outGrid && inGrid) {
+  if (outGrid) {
     const outBar = 4 * secondsPerBeat(outGrid.bpm)
-    const inBar = 4 * secondsPerBeat(inGrid.bpm)
-    const matched = matchRate(outGrid.bpm * outgoing.rate, inGrid.bpm)
+    const matched = inGrid ? matchRate(outGrid.bpm * outgoing.rate, inGrid.bpm) : undefined
     const incomingRate = matched ?? incoming.rate
     const ratio = incomingRate / outgoing.rate
     const base = { incomingRate, ratio, beatmatched: matched !== undefined }
-    const fitsIncoming = (from: number, outSeconds: number): boolean =>
-      from + outSeconds * ratio <= incoming.duration && from >= 0
 
-    if (matched !== undefined) {
+    if (inGrid && matched !== undefined) {
       const inKey = incoming.key === null ? null : (keyAtRate(incoming.key, matched) ?? null)
       const outKey = outgoing.key === null ? null : (keyAtRate(outgoing.key, outgoing.rate) ?? null)
-      const compatible = keysCompatible(outKey, inKey)
-
-      if (compatible !== false) {
-        for (const bars of compatible ? [16, 8] : [8]) {
-          const end = mixOutLine(outGrid, bars, songEnd)
-          const startAt = end - bars * outBar
-          if (startAt < earliest || startAt < outGrid.firstBeat - 0.05) continue
-          if (!fitsIncoming(inGrid.phraseStart, end - startAt)) continue
-          return { kind: 'blend', bars, startAt, incomingFrom: inGrid.phraseStart, swapAt: (startAt + end) / 2, endAt: end, ...base }
-        }
-      } else {
-        for (const bars of [16, 8]) {
-          const drop = incoming.details!.drops.find((time) => time - bars * inBar >= inGrid.firstBeat - 0.05)
-          if (drop === undefined) continue
-          const end = mixOutLine(outGrid, 16, songEnd)
-          const startAt = end - bars * outBar
-          if (startAt < earliest || startAt < outGrid.firstBeat - 0.05) continue
-          const incomingFrom = drop - bars * inBar
-          if (!fitsIncoming(incomingFrom, end - startAt)) continue
-          return { kind: 'drop', bars, startAt, incomingFrom, swapAt: end, endAt: end + outBar / 4, ...base }
-        }
+      // Clashing keys get a shorter blend, so they overlap for less time.
+      for (const bars of keysCompatible(outKey, inKey) === false ? [8] : [16, 8]) {
+        const end = mixOutLine(outGrid, bars, songEnd)
+        const startAt = end - bars * outBar
+        if (startAt < earliest || startAt < outGrid.firstBeat - 0.05) continue
+        if (inGrid.phraseStart + (end - startAt) * ratio > incoming.duration) continue
+        const swapAt = (startAt + end) / 2
+        return { kind: 'blend', bars, startAt, sweepFrom: startAt, incomingFrom: inGrid.phraseStart, swapAt, endAt: end, ...base }
       }
     }
 
-    // A cut on the last phrase line, or the next bar line if that has passed.
-    const phraseEnd = mixOutLine(outGrid, 16, songEnd)
-    const cutAt = phraseEnd >= earliest ? phraseEnd : nextBarLine(outGrid, earliest)
+    const end = mixOutLine(outGrid, 16, songEnd)
+    const soundStart = incoming.details?.soundStart ?? 0
+    const opensBeatless =
+      !inGrid || soundStart <= inGrid.firstBeat - BEATLESS_INTRO_BARS * 4 * secondsPerBeat(inGrid.bpm)
+
+    // A filter fade onto the last phrase line.
+    for (const bars of FILTER_BARS) {
+      const sweepFrom = end - bars * outBar
+      if (sweepFrom < earliest || sweepFrom < outGrid.firstBeat - 0.05) continue
+      if (opensBeatless) {
+        if (soundStart + (end - sweepFrom) * ratio > incoming.duration) continue
+        const swapAt = (sweepFrom + end) / 2
+        return { kind: 'filter', bars, startAt: sweepFrom, sweepFrom, incomingFrom: soundStart, swapAt, endAt: end, ...base }
+      }
+      return { kind: 'filter', bars, startAt: end, sweepFrom, incomingFrom: inGrid!.phraseStart, swapAt: end, endAt: end, ...base }
+    }
+
+    // Too late for that: a cut on the next bar line.
+    const cutAt = nextBarLine(outGrid, earliest)
     if (cutAt <= songEnd) {
-      return { kind: 'cut', bars: 0, startAt: cutAt, incomingFrom: inGrid.phraseStart, swapAt: cutAt, endAt: cutAt, ...base }
+      const incomingFrom = inGrid?.phraseStart ?? soundStart
+      return { kind: 'cut', bars: 0, startAt: cutAt, sweepFrom: cutAt, incomingFrom, swapAt: cutAt, endAt: cutAt, ...base }
     }
   }
 
@@ -193,6 +208,7 @@ export function planTransition(outgoing: Deck, incoming: Deck, now: number): Tra
     kind: 'fade',
     bars: 0,
     startAt,
+    sweepFrom: startAt,
     incomingFrom: incoming.details?.soundStart ?? 0,
     incomingRate: incoming.rate,
     ratio: incoming.rate / outgoing.rate,
@@ -211,6 +227,7 @@ function progress(time: number, from: number, to: number): number {
 /** How loud each deck is, and whether its bass is in, at outgoing file time `time`. */
 export function levelsAt(plan: TransitionPlan, time: number): MixLevels {
   const swapped = time >= plan.swapAt
+  const open = { outHighPass: 0, inLowPass: 0 }
   switch (plan.kind) {
     case 'blend': {
       // Equal power over the whole blend, so the overall level doesn't dip, and the basslines swap halfway.
@@ -220,19 +237,33 @@ export function levelsAt(plan: TransitionPlan, time: number): MixLevels {
         outLows: swapped ? 0 : 1,
         inLevel: time < plan.startAt ? 0 : Math.sin((x * Math.PI) / 2),
         inLows: swapped ? 1 : 0,
+        ...open,
       }
     }
-    case 'drop': {
-      // The build-up rises under the outgoing song without its bass; on the drop, the outgoing song goes.
-      if (swapped) return { outLevel: 1 - progress(time, plan.swapAt, plan.endAt), outLows: 0, inLevel: 1, inLows: 1 }
-      const x = progress(time, plan.startAt, plan.swapAt)
-      return { outLevel: 1, outLows: 1, inLevel: time < plan.startAt ? 0 : DROP_BUILD_LEVEL * Math.sin((x * Math.PI) / 2), inLows: 0 }
+    case 'filter': {
+      // The outgoing song's high-pass sweeps up to the line, where it's gone.
+      const x = progress(time, plan.sweepFrom, plan.endAt)
+      const done = time >= plan.endAt
+      if (plan.startAt >= plan.endAt) {
+        // Into a beat: the incoming song comes in, unfiltered, on the line.
+        return done
+          ? { outLevel: 0, outLows: 1, outHighPass: 1, inLevel: 1, inLows: 1, inLowPass: 0 }
+          : { outLevel: 1, outLows: 1, outHighPass: x, inLevel: 0, inLows: 1, inLowPass: 0 }
+      }
+      // Into a beatless intro: it fades in as its low-pass opens. The levels add up to 1, as the beats aren't matched.
+      const out = done ? 0 : Math.cos((x * Math.PI) / 2) ** 2
+      return { outLevel: out, outLows: 1, outHighPass: x, inLevel: time < plan.startAt ? 0 : 1 - out, inLows: 1, inLowPass: 1 - x }
     }
     case 'cut':
-      return swapped ? { outLevel: 0, outLows: 1, inLevel: 1, inLows: 1 } : { outLevel: 1, outLows: 1, inLevel: 0, inLows: 1 }
+      return swapped
+        ? { outLevel: 0, outLows: 1, inLevel: 1, inLows: 1, ...open }
+        : { outLevel: 1, outLows: 1, inLevel: 0, inLows: 1, ...open }
     case 'fade': {
+      // The songs aren't beatmatched, so they can peak together: the levels always add up to 1 (half each in the
+      // middle), which can never go over full scale, unlike equal power (71% each). The basslines swap halfway.
       const x = progress(time, plan.startAt, plan.endAt)
-      return { outLevel: Math.cos((x * Math.PI) / 2), outLows: 1, inLevel: time < plan.startAt ? 0 : Math.sin((x * Math.PI) / 2), inLows: 1 }
+      const out = Math.cos((x * Math.PI) / 2) ** 2
+      return { outLevel: out, outLows: swapped ? 0 : 1, inLevel: time < plan.startAt ? 0 : 1 - out, inLows: swapped ? 1 : 0, ...open }
     }
   }
 }
@@ -257,7 +288,7 @@ export function nudgedRate(rate: number, errorSeconds: number, silent: boolean):
   return rate * (1 - Math.min(limit, Math.max(-limit, errorSeconds)))
 }
 
-/** The plan's short name, e.g. "16-bar blend" or "Drop mix". */
+/** The plan's short name, e.g. "16-bar blend" or "Filter fade". */
 export function transitionName(plan: TransitionPlan): string {
-  return { blend: `${plan.bars}-bar blend`, drop: 'Drop mix', cut: 'Cut', fade: 'Quick fade' }[plan.kind]
+  return { blend: `${plan.bars}-bar blend`, filter: 'Filter fade', cut: 'Cut', fade: 'Quick fade' }[plan.kind]
 }
