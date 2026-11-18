@@ -1,5 +1,5 @@
 import MusicTempo from 'music-tempo'
-import type { BeatGrid, DjDetails, DjSection, DjSectionKind } from '../shared/djDetails'
+import type { BarLevels, BeatGrid, DjDetails, DjSection, DjSectionKind } from '../shared/djDetails'
 import { decodeAudio } from './audioDecoding'
 
 /** A song's BPM (to 0.1; undefined with no steady beat) and what a DJ needs to mix it. */
@@ -81,7 +81,7 @@ function rhythmOfSamples(samples: Float32Array): RhythmAnalysis {
       soundStart: sound ? round(sound.start, 3) : null,
       soundEnd: sound ? round(sound.end, 3) : null,
       loudness: loudness === undefined ? null : round(loudness, 1),
-      grid: grid ? publicGrid(grid) : null,
+      grid: grid ? { ...publicGrid(grid), barLevels: barLevels(grid, full, low, analysedSeconds) } : null,
       sections: sections.map((section) => ({ ...section, start: round(section.start, 3), end: round(section.end, 3) })),
       drops: grid ? dropsIn(sections, grid).map((time) => round(time, 3)) : [],
       analysedSeconds: round(analysedSeconds, 3),
@@ -637,6 +637,22 @@ function publicGrid(grid: Grid): BeatGrid {
     phraseStart: round(Math.max(0, grid.origin + grid.phrase * grid.period), 3),
     confidence: round(grid.confidence, 2),
   }
+}
+
+// The level of every whole bar (dB to 0.1, of the whole sound and of the low end), from the first bar line at or after
+// the start of the file: how much energy each part of the song has, for choosing where to bring it in. An intro of
+// drums alone can be nearly as loud as the full song, but it's missing the bassline.
+function barLevels(grid: Grid, full: EnergyTrack, low: EnergyTrack, seconds: number): BarLevels {
+  const bar = beatsPerBar * grid.period
+  const phraseStart = Math.max(0, grid.origin + grid.phrase * grid.period)
+  const from = phraseStart - Math.floor(phraseStart / bar) * bar
+  const db: number[] = []
+  const lowDb: number[] = []
+  for (let start = from; start + bar <= seconds; start += bar) {
+    db.push(round(clampDb(full.db(start, start + bar)), 1))
+    lowDb.push(round(clampDb(low.db(start, start + bar)), 1))
+  }
+  return { from: round(from, 3), db, lowDb }
 }
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value))

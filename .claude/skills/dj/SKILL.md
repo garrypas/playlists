@@ -148,6 +148,7 @@ wall-clock time = now + (boundary − t) / rate
 | `grid.firstBeat`, `grid.lastBeat` | The first and last kicks that start or end a run of at least 3 kicks in 4 beats (a stray hit doesn't count). Beat n is at `firstBeat + n × 60 / grid.bpm` |
 | `grid.phraseStart` | The first beat at or after `firstBeat` that starts a 16-bar phrase. Bars every 4 beats and phrases every 64 beats from it, in both directions |
 | `grid.confidence` | The share of beats with a kick in bars that have a beat (breakdowns aren't counted). Below 0.3 there's no grid. Real tracks score 0.8–1.0 |
+| `grid.barLevels` | `{ from, db, lowDb }`: each whole bar's level (dBFS to 0.1) of the whole sound and of the low end (below 150 Hz), from the first bar line at or after 0 s (`from`). How much energy each part has, for choosing where a song comes in. Missing in details from detector version 3 or older |
 | `sections` | `{ kind, start, end }`, covering 0 to `analysedSeconds` without gaps, cut on bar lines (every 2 s with no grid) and at `soundStart`/`soundEnd`. `silent` ≤ −60 dB; `quiet` more than 12 dB below `loudness`; `beat` when at least half its beats have a kick; else `beatless` |
 | `drops` | Starts of `beat` sections that follow a `beatless` or `quiet` section of 8 bars or more, after the beat has first started (the first kick after an intro is the mix-in point, not a drop) |
 | `analysedSeconds` | The first 1200 s at most; nothing is known after it (long mixes) |
@@ -207,7 +208,7 @@ The phase from every point in the beat (`kickPhase`, version 3), against the hal
   3. Run the built `out/main/analysisWorker.js` (`kind: 'rhythm'`) on the matching files.
 - Compare downbeats over the whole song, not near the first kick. Many intros fade in from noise, and a rounded rekordbox tempo drifts away from the real one.
 
-**Re-detection:** `rhythmDetectorVersion` (`app_meta.rhythm_detector`, currently 3) resets `dj_read` on every file once when raised. Files keep their old BPM and DJ details until the new ones arrive. Raise it whenever the grid, phrases or sections are found differently.
+**Re-detection:** `rhythmDetectorVersion` (`app_meta.rhythm_detector`, currently 4) resets `dj_read` on every file once when raised. Files keep their old BPM and DJ details until the new ones arrive. Raise it whenever the grid, phrases or sections are found differently.
 
 **Speed:**
 - About 1 s for a 6-minute song and 1.5 s for 10½ minutes, on an Apple Silicon Mac. That's checked on 46 real tracks, and a test requires a 6-minute song to take under 5 s.
@@ -230,7 +231,13 @@ The phase from every point in the beat (`kickPhase`, version 3), against the hal
   - Keys are compared at their played speeds (`keyAtRate`, rounded to a semitone) with `keysCompatible`: the same code, ±1 with the same letter, or the same number with the other letter. Unknown → undefined.
 - **Mix-out line:** the last line every N bars from `phraseStart`, at or before the end of the last bar of beats (`lastBeat` + 1 beat, capped at `soundEnd`/duration).
 - **Order of preference:**
-  1. **Blend** whenever the tempos match: 16 bars, or 8 when the keys clash (they overlap for less time). It ends on the mix-out line for that length. The incoming song starts at its `phraseStart`, so phrase meets phrase. Swap halfway. Falls to 8 bars if 16 has passed or doesn't fit the incoming song.
+  1. **Blend** whenever the tempos match: 32 bars, or 16 when the keys clash (they overlap for less time). It ends on the mix-out line for that length. Swap halfway. Falls to 16, then 8 bars if the longer one has passed or doesn't fit the incoming song (the user asked for blends longer than 8 bars).
+     - **Where the incoming song comes in** (`entryPoint`), as a DJ cues it: its `phraseStart`, so phrase meets phrase, unless its intro would take over with clearly less energy than the outgoing song has.
+       - Energy (`energyBetween`) is the average, over a span of bars, of the whole sound's level and the low end's. Each is measured against the song's own 75th-percentile bar, so mastering levels don't count, and a drums-only intro without its bassline does.
+       - The incoming song's energy over the blend's second half (when it takes over and carries the bass) is compared with the outgoing song's over the first half.
+       - If it's more than `ENERGY_DROP_DB` (3 dB) lower, later phrase lines are tried, every `ENTRY_STEP_BARS` (16) up to `MAX_ENTRY_BARS` (64) in. Each needs a beat and room for the whole blend. The first with the energy wins.
+       - If none has it, the one with the most wins if it beats the first phrase by 3 dB; otherwise the first phrase does. Without `barLevels` it's the first phrase.
+     - On the user's playlists this moved 2 entries of 6 blends: intros 10.7 dB down, and 7.2 dB down against an outro 3.6 dB down, came in 16 and 32 bars later. The others were within 1.5 dB. Full-band level alone separated them poorly (7 dB and 5 dB), because a drums-only intro is nearly as loud as the whole song.
      - Blending on a clash was the user's call: with random keys only about 1 pair in 6 is compatible, so cutting on a clash meant cutting almost every time.
   2. **Filter fade** onto the 16-bar mix-out line (needs only the outgoing grid). It lasts 4 bars, or 2 if 4 have passed.
      - **Into a song that opens without a beat** (no usable grid, or `soundStart` at least 4 of its bars before `firstBeat`): the incoming song starts from `soundStart` at the start of the sweep and swaps halfway.
@@ -274,8 +281,8 @@ The phase from every point in the beat (`kickPhase`, version 3), against the hal
 - **Tempo:** `tempo` in `App` is `djTempo` while it's for the current song, else the song's saved tempo. That's how "the playing song's tempo is the DJ's starting tempo" works. `changeTempo` does nothing in DJ mode, and the slider is `aria-disabled`.
 
 **UI:** a headphones button left of Shuffle ("DJ mode", `aria-pressed`). A `role="status"` line (`.dj-status`) sits under the progress bar:
-- "DJ: 16-bar blend into Two at 3:44" (planned, with the outgoing song's time at `sweepFrom`)
-- "DJ: mixing into Two (16-bar blend)"
+- "DJ: 32-bar blend into Two at 3:12" (planned, with the outgoing song's time at `sweepFrom`)
+- "DJ: mixing into Two (32-bar blend)"
 - "DJ: mixing out of One"
 - "DJ: next up, Two" (waiting for details)
 - "DJ: nothing to mix into after this song"
@@ -296,7 +303,7 @@ Settled (the user asked for DJ mode off by default and toggled in the UI, with t
 2. **Tempo isn't saved.** The matched speed holds for the rest of the song; turning DJ mode off restores saved tempos.
 3. **Engine:** option A, two elements, with CORS on `playlist-audio:` (see `security.md` rule 16).
 4. **Shuffle:** DJ mode follows the shuffle order; it doesn't reorder.
-5. **Default transition:** a 16-bar blend; an 8-bar blend on a key clash. When the beats can't be matched, a filter fade rather than a cut (the user found cuts unnatural).
+5. **Default transition:** a 32-bar blend; a 16-bar blend on a key clash (the user asked for blends longer than 8 bars). The incoming song comes in later than its first phrase when its intro has clearly less energy than the outgoing song, as a DJ would (the user asked). When the beats can't be matched, a filter fade rather than a cut (the user found cuts unnatural).
 
 6. **DJ mode is remembered** between launches (the user asked).
 
@@ -328,14 +335,19 @@ Open: cue points (detected only, or user-editable? per file or per playlist entr
   - matching tempos, including half and double time;
   - Camelot codes and compatibility, with keys compared after the shift;
   - every plan type and its fallbacks (shorter blends, the next bar line, a loose grid, a file longer than its analysis);
+  - where the incoming song comes in:
+    - its first phrase at equal energy, a later phrase under a louder outro, but not under a quiet outro;
+    - within 3 dB, it stays on the first phrase;
+    - only where it has a beat, at most 64 bars in, and leaving room for the blend;
+    - the first phrase without bar levels;
   - phase within 1 ms over 64 bars;
   - equal-power blend levels and the bass swap;
   - fade levels that never sum past 1, with the basslines swapped.
 - `src/renderer/src/djMode.test.tsx` tests through `heard()`, `player()` and `djStatus()`:
   - off by default, still on (and mixing) after `relaunch()`, and the tempo lock;
-  - a 16-bar blend (levels, bass, speed, the swap, the end);
+  - a 32-bar blend (levels, bass, speed, the swap, the end), and one into a song with a quiet intro, which comes in a phrase later;
   - matching the playing song's saved tempo;
-  - an 8-bar blend on a key clash; a filter fade into a beat (the outgoing song filtered out first) and into a beatless intro (both filtered, overlapping, never louder together than one song); a quick fade;
+  - a 16-bar blend on a key clash; a filter fade into a beat (the outgoing song filtered out first) and into a beatless intro (both filtered, overlapping, never louder together than one song); a quick fade;
   - mixing into the queue;
   - pausing mid-mix and re-planning shorter, skipping mid-mix, turning DJ mode off mid-mix;
   - the last song;

@@ -114,6 +114,18 @@ describe('finding what a DJ needs to mix a song', () => {
     expect(dj.analysedSeconds).toBeCloseTo(barLine(72), 1)
   })
 
+  it('measures how loud each bar is, to tell an intro, a breakdown or an outro from the main part', async () => {
+    const levels = (await detectRhythm(file('structured.wav'))).dj.grid!.barLevels!
+    expect(levels.from).toBeCloseTo(1, 1)
+    expect(levels.db.length).toBeGreaterThanOrEqual(71)
+    const average = (from: number, to: number): number =>
+      levels.db.slice(from, to).reduce((total, db) => total + db, 0) / (to - from)
+    // The breakdown has the pad without the kick; the outro is the pad at 5%, about 26 dB down.
+    expect(average(16, 32)).toBeLessThan(average(0, 16))
+    expect(average(32, 64)).toBeCloseTo(average(0, 16), 0)
+    expect(average(64, 70)).toBeCloseTo(average(16, 32) - 26, -1)
+  })
+
   it('puts the grid on the kicks, not on an off-beat bassline that rises more sharply', async () => {
     const { grid } = (await detectRhythm(file('trance.wav'))).dj
     expect(grid?.bpm).toBeCloseTo(138.7, 2)

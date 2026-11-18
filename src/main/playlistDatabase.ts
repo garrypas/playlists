@@ -438,8 +438,8 @@ const tempoDetectorVersion = 2
 // Raise this when the beat grid, phrase start or other DJ details are found differently, so every file is analysed
 // again. 2: the tempo from the kicks across the whole song, kicks rather than an off-beat bassline, and bar lines from
 // where the kick returns and the level changes. 3: where in the beat the kicks fall, chosen from every phase rather
-// than the strongest line or the half beat after it.
-const rhythmDetectorVersion = 3
+// than the strongest line or the half beat after it. 4: each bar's level, for choosing where to bring a song in.
+const rhythmDetectorVersion = 4
 
 const nextPlaylistPosition = '(SELECT COALESCE(MAX(position), -1) + 1 FROM playlists)'
 

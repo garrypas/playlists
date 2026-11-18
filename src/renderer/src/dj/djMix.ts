@@ -72,6 +72,17 @@ const FADE_SECONDS = 3
 const FILTER_BARS = [4, 2]
 /** An incoming song with at least this many bars before its first kick opens without a beat. */
 const BEATLESS_INTRO_BARS = 4
+/** A blend's lengths to try, in bars: as long as there's room for, shorter when the keys clash. */
+const BLEND_BARS = [32, 16, 8]
+const CLASHING_BLEND_BARS = [16, 8]
+/**
+ * Where the incoming song may come in: on its phrase lines, up to this many bars after its first one, when its intro
+ * has less energy than the outgoing song's outro.
+ */
+const ENTRY_STEP_BARS = 16
+const MAX_ENTRY_BARS = 64
+/** How much quieter (dB, each against its own usual level) the incoming song may be as it takes over. */
+const ENERGY_DROP_DB = 3
 
 export function secondsPerBeat(bpm: number): number {
   return 60 / bpm
@@ -128,6 +139,65 @@ function mixOutLine(grid: BeatGrid, bars: number, songEnd: number): number {
   return grid.phraseStart + Math.floor((limit - grid.phraseStart) / step) * step
 }
 
+/**
+ * How much energy a song has between two of its file times, against its own louder parts (dB; 0 is as much as usual),
+ * or undefined if that isn't known. It's the average of the whole sound's level and the low end's, each against the
+ * song's 75th-percentile bar: an intro of drums alone can be nearly as loud as the full song but lack its bassline.
+ */
+function energyBetween(grid: BeatGrid, from: number, to: number): number | undefined {
+  const levels = grid.barLevels
+  if (!levels) return undefined
+  const bar = 4 * secondsPerBeat(grid.bpm)
+  const first = Math.max(0, Math.round((from - levels.from) / bar))
+  const last = Math.min(levels.db.length, Math.round((to - levels.from) / bar))
+  if (last <= first) return undefined
+  const against = (db: number[]): number => {
+    const usual = [...db].sort((a, b) => a - b)[Math.floor(db.length * 0.75)]
+    return db.slice(first, last).reduce((total, level) => total + level - usual, 0) / (last - first)
+  }
+  return (against(levels.db) + against(levels.lowDb)) / 2
+}
+
+// Whether the song has a beat at `time`.
+function hasBeatAt(details: DjDetails, time: number): boolean {
+  return details.sections.some((section) => section.kind === 'beat' && section.start <= time && time < section.end)
+}
+
+/**
+ * Where the incoming song comes in, for a blend from `startAt` to `end` (outgoing file time), as a DJ cues it: its
+ * first phrase, unless that leaves it with clearly less energy than the outgoing song as it takes over (its level over
+ * the blend's second half, against the outgoing song's over the first, each against its own usual level). Then the
+ * first later phrase line with a beat that has the energy (up to `MAX_ENTRY_BARS` in), or failing that the one with
+ * the most.
+ */
+function entryPoint(
+  outGrid: BeatGrid,
+  incoming: Deck,
+  inGrid: BeatGrid,
+  startAt: number,
+  end: number,
+  ratio: number,
+): number {
+  const details = incoming.details!
+  const length = (end - startAt) * ratio
+  const target = energyBetween(outGrid, startAt, (startAt + end) / 2)
+  const phrase = ENTRY_STEP_BARS * 4 * secondsPerBeat(inGrid.bpm)
+  const candidates: { from: number; energy: number }[] = []
+  for (let step = 0; step <= MAX_ENTRY_BARS / ENTRY_STEP_BARS; step++) {
+    const from = inGrid.phraseStart + step * phrase
+    if (from + length > Math.min(incoming.duration, details.analysedSeconds)) break
+    if (step > 0 && !hasBeatAt(details, from + 0.01)) continue
+    const energy = energyBetween(inGrid, from + length / 2, from + length)
+    if (energy === undefined) break
+    candidates.push({ from, energy })
+  }
+  if (target === undefined || candidates.length === 0) return inGrid.phraseStart
+  const enough = candidates.find((candidate) => candidate.energy >= target - ENERGY_DROP_DB)
+  if (enough) return enough.from
+  const loudest = candidates.reduce((best, candidate) => (candidate.energy > best.energy ? candidate : best))
+  return loudest.energy >= candidates[0].energy + ENERGY_DROP_DB ? loudest.from : candidates[0].from
+}
+
 // The first bar line in the song at or after `time`.
 function nextBarLine(grid: BeatGrid, time: number): number {
   const bar = 4 * secondsPerBeat(grid.bpm)
@@ -137,8 +207,9 @@ function nextBarLine(grid: BeatGrid, time: number): number {
 /**
  * Plans how `outgoing` hands over to `incoming`, with `now` the outgoing song's current file time. In order of
  * preference:
- * - a phrase-matched **blend** over the outgoing song's last 16 bars when the tempos match within ±10%, or its last 8
- *   when the keys clash (or 16 doesn't fit);
+ * - a phrase-matched **blend** over the outgoing song's last 32 bars when the tempos match within ±10%, or its last 16
+ *   when the keys clash (or shorter when that doesn't fit). The incoming song comes in on its first phrase, or a later
+ *   one if its intro has clearly less energy than the outgoing song's outro;
  * - a **filter fade** onto the outgoing song's last phrase line when the beats can't be matched: its high-pass sweeps
  *   up over 4 (or 2) bars. An incoming song that opens without a beat fades in over the same bars, its low-pass
  *   opening; one that opens on its beat comes in on the line, so two unmatched beats never play together;
@@ -163,13 +234,14 @@ export function planTransition(outgoing: Deck, incoming: Deck, now: number): Tra
       const inKey = incoming.key === null ? null : (keyAtRate(incoming.key, matched) ?? null)
       const outKey = outgoing.key === null ? null : (keyAtRate(outgoing.key, outgoing.rate) ?? null)
       // Clashing keys get a shorter blend, so they overlap for less time.
-      for (const bars of keysCompatible(outKey, inKey) === false ? [8] : [16, 8]) {
+      for (const bars of keysCompatible(outKey, inKey) === false ? CLASHING_BLEND_BARS : BLEND_BARS) {
         const end = mixOutLine(outGrid, bars, songEnd)
         const startAt = end - bars * outBar
         if (startAt < earliest || startAt < outGrid.firstBeat - 0.05) continue
         if (inGrid.phraseStart + (end - startAt) * ratio > incoming.duration) continue
+        const incomingFrom = entryPoint(outGrid, incoming, inGrid, startAt, end, ratio)
         const swapAt = (startAt + end) / 2
-        return { kind: 'blend', bars, startAt, sweepFrom: startAt, incomingFrom: inGrid.phraseStart, swapAt, endAt: end, ...base }
+        return { kind: 'blend', bars, startAt, sweepFrom: startAt, incomingFrom, swapAt, endAt: end, ...base }
       }
     }
 

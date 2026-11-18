@@ -88,19 +88,28 @@ export function djStatus(): string | undefined {
 
 /**
  * What background analysis finds in a steady dance track: `bars` bars of kicks at `bpm` from `firstBeat`, with
- * phrases from `phraseStart` and any drops (seconds).
+ * phrases from `phraseStart`, any drops (seconds), and optionally a quiet intro (`quietBars` bars, 9 dB down).
  */
 export function djTrack(
   bpm: number,
-  { bars, firstBeat = 0, phraseStart = firstBeat, drops = [] }: { bars: number; firstBeat?: number; phraseStart?: number; drops?: number[] },
+  {
+    bars,
+    firstBeat = 0,
+    phraseStart = firstBeat,
+    drops = [],
+    quietBars = 0,
+  }: { bars: number; firstBeat?: number; phraseStart?: number; drops?: number[]; quietBars?: number },
 ): DjDetails {
   const beat = 60 / bpm
   const lastBeat = firstBeat + (bars * 4 - 1) * beat
+  // Every bar at the song's usual level (-9 dB), except a quiet intro of `quietBars` bars, 9 dB down.
+  const db = Array.from({ length: bars }, (_, bar) => (bar < quietBars ? -18 : -9))
+  const barLevels = { from: firstBeat, db, lowDb: db }
   return {
     soundStart: firstBeat,
     soundEnd: lastBeat + beat,
     loudness: -9,
-    grid: { bpm, firstBeat, lastBeat, phraseStart, confidence: 0.95 },
+    grid: { bpm, firstBeat, lastBeat, phraseStart, confidence: 0.95, barLevels },
     sections: [{ kind: 'beat', start: firstBeat, end: lastBeat + beat }],
     drops,
     analysedSeconds: lastBeat + beat + 5,

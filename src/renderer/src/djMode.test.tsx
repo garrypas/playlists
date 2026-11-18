@@ -20,7 +20,7 @@ import {
 } from './test/app'
 import type { SongSpec } from './test/fakeDesktop'
 
-// "One" is 128 bars at 120 BPM (a bar every 2 s, a 16-bar phrase every 32 s), so its last phrase runs 224–256 s.
+// "One" is 128 bars at 120 BPM (a bar every 2 s, a 16-bar phrase every 32 s), so its last two phrases run 192–256 s.
 const one = { title: 'One', bpm: 120, key: 'Am', durationSeconds: 260, dj: djTrack(120, { bars: 128 }) }
 // "Two" is at 122 BPM, a key that blends with Am (Em, a fifth away), with its first kick and phrase at 0.5 s.
 const two = { title: 'Two', bpm: 122, key: 'Em', durationSeconds: 300, dj: djTrack(122, { bars: 140, firstBeat: 0.5 }) }
@@ -55,10 +55,10 @@ describe('DJ mode', () => {
     expect(tempoSlider()).toHaveAttribute('aria-disabled', 'true')
     await reopened.user.click(playerButton('Play'))
     songLoaded(260)
-    await waitFor(() => expect(djStatus()).toBe('DJ: 16-bar blend into Two at 3:44'))
-    playTo(224)
-    await waitFor(() => expect(djStatus()).toBe('DJ: mixing into Two (16-bar blend)'))
-    playTo(232)
+    await waitFor(() => expect(djStatus()).toBe('DJ: 32-bar blend into Two at 3:12'))
+    playTo(192)
+    await waitFor(() => expect(djStatus()).toBe('DJ: mixing into Two (32-bar blend)'))
+    playTo(208)
     expect(heard()).toMatchObject({ One: { bass: true }, Two: { bass: false } })
 
     await reopened.user.click(djModeButton())
@@ -79,51 +79,52 @@ describe('DJ mode', () => {
     expect(player().speed).toBe(110)
   })
 
-  it('blends the next song in over the last 16 bars, matched in tempo, with the bass swapped halfway', async () => {
+  it('blends the next song in over the last 32 bars, matched in tempo, with the bass swapped halfway', async () => {
     await startDj([one, two])
-    await waitFor(() => expect(djStatus()).toBe('DJ: 16-bar blend into Two at 3:44'))
+    await waitFor(() => expect(djStatus()).toBe('DJ: 32-bar blend into Two at 3:12'))
 
-    playTo(200)
+    playTo(180)
     expect(heard()).toEqual({ One: { volume: 100, speed: 100, bass: true } })
 
-    // The blend starts on the last phrase: Two comes in from its first phrase, slowed to 120 BPM, without its bass.
-    playTo(224)
-    await waitFor(() => expect(djStatus()).toBe('DJ: mixing into Two (16-bar blend)'))
-    playTo(232)
+    // The blend starts two phrases from the end: Two comes in from its first phrase, slowed to 120 BPM, without its
+    // bass.
+    playTo(192)
+    await waitFor(() => expect(djStatus()).toBe('DJ: mixing into Two (32-bar blend)'))
+    playTo(208)
     expect(heard()).toEqual({
       One: { volume: 92, speed: 100, bass: true },
       Two: { volume: 38, speed: 98.4, bass: false },
     })
 
     // Halfway, Two takes over as the playing song and the basslines swap.
-    playTo(240)
+    playTo(224)
     await waitFor(() => expectPlaying('Two'))
-    expect(player().time).toBeCloseTo(0.5 + 16 * twoPerOne, 6)
+    expect(player().time).toBeCloseTo(0.5 + 32 * twoPerOne, 6)
     expect(heard()).toMatchObject({ One: { bass: false }, Two: { bass: true, speed: 98.4 } })
     expect(screen.getByText('Two', { selector: '.now-playing strong' })).toBeInTheDocument()
     expect(tempoSlider()).toHaveAttribute('aria-valuetext', '−1.6%, 122.0 (120.0) BPM, key Em')
 
     // At the end of One's last phrase, it has faded out and stopped.
-    playTo(0.5 + 32 * twoPerOne + 0.01)
+    playTo(0.5 + 64 * twoPerOne + 0.01)
     await waitFor(() => expect(heard()).toEqual({ Two: { volume: 100, speed: 98.4, bass: true } }))
   })
 
   it('matches the next song to the tempo the playing song already had', async () => {
     await startDj([{ ...one, tempo: 2 }, two])
-    await waitFor(() => expect(djStatus()).toMatch(/^DJ: 16-bar blend into Two/))
-    playTo(224)
+    await waitFor(() => expect(djStatus()).toMatch(/^DJ: 32-bar blend into Two/))
+    playTo(192)
     await waitFor(() => expect(djStatus()).toMatch(/^DJ: mixing into Two/))
-    playTo(228)
+    playTo(196)
     expect(heard().Two?.speed).toBe(100.3)
   })
 
-  it('still blends when the keys clash, over the last 8 bars', async () => {
+  it('still blends when the keys clash, over the last 16 bars', async () => {
     const clashing = { ...two, bpm: 120, key: 'F#', dj: djTrack(120, { bars: 140 }) }
     await startDj([one, clashing])
-    await waitFor(() => expect(djStatus()).toBe('DJ: 8-bar blend into Two at 4:00'))
-    playTo(240)
+    await waitFor(() => expect(djStatus()).toBe('DJ: 16-bar blend into Two at 3:44'))
+    playTo(224)
     await waitFor(() => expect(djStatus()).toMatch(/^DJ: mixing into Two/))
-    playTo(248)
+    playTo(240)
     await waitFor(() => expectPlaying('Two'))
     expect(heard()).toMatchObject({ One: { bass: false }, Two: { bass: true } })
   })
@@ -176,38 +177,51 @@ describe('DJ mode', () => {
     await waitFor(() => expect(Object.keys(heard())).toEqual(['Two']))
   })
 
+  it('brings the next song in a phrase later when its intro has much less energy than the playing song', async () => {
+    // Two's first 32 bars are 9 dB quieter than the rest of it; One is at its usual level throughout.
+    const quietIntro = { ...two, dj: djTrack(122, { bars: 140, firstBeat: 0.5, quietBars: 32 }) }
+    await startDj([one, quietIntro])
+    await waitFor(() => expect(djStatus()).toBe('DJ: 32-bar blend into Two at 3:12'))
+    playTo(192)
+    await waitFor(() => expect(djStatus()).toMatch(/^DJ: mixing into Two/))
+    playTo(224)
+    await waitFor(() => expectPlaying('Two'))
+    // It came in 16 of its bars late, so by the swap it's into its full-energy part.
+    expect(player().time).toBeCloseTo(0.5 + 16 * 4 * (60 / 122) + 32 * twoPerOne, 6)
+  })
+
   it('mixes into what’s queued next', async () => {
     const three = { ...two, title: 'Three' }
     const { user } = await startDj([one, two, three])
     await user.click(screen.getByRole('button', { name: 'Add Three to queue' }))
-    await waitFor(() => expect(djStatus()).toBe('DJ: 16-bar blend into Three at 3:44'))
+    await waitFor(() => expect(djStatus()).toBe('DJ: 32-bar blend into Three at 3:12'))
+    playTo(192)
     playTo(224)
-    playTo(240)
     await waitFor(() => expectPlaying('Three'))
     expect(queueButton()).toHaveAccessibleName('Queue')
   })
 
   it('stops the incoming song when paused mid-mix, then plans a shorter mix from there', async () => {
     const { user } = await startDj([one, two])
-    await waitFor(() => expect(djStatus()).toMatch(/^DJ: 16-bar blend/))
-    playTo(224)
+    await waitFor(() => expect(djStatus()).toMatch(/^DJ: 32-bar blend/))
+    playTo(192)
     await waitFor(() => expect(djStatus()).toMatch(/^DJ: mixing into Two/))
-    playTo(228)
+    playTo(196)
     expect(heard().Two).toBeDefined()
-    playTo(230)
+    playTo(198)
     await user.click(playerButton('Pause'))
     expect(heard()).toEqual({})
     await user.click(playerButton('Play'))
     expect(Object.keys(heard())).toEqual(['One'])
-    await waitFor(() => expect(djStatus()).toBe('DJ: 8-bar blend into Two at 4:00'))
+    await waitFor(() => expect(djStatus()).toBe('DJ: 16-bar blend into Two at 3:44'))
   })
 
   it('jumps straight to the next song when skipped mid-mix', async () => {
     const { user } = await startDj([one, two])
-    await waitFor(() => expect(djStatus()).toMatch(/^DJ: 16-bar blend/))
-    playTo(224)
+    await waitFor(() => expect(djStatus()).toMatch(/^DJ: 32-bar blend/))
+    playTo(192)
     await waitFor(() => expect(djStatus()).toMatch(/^DJ: mixing into Two/))
-    playTo(228)
+    playTo(196)
     expect(heard().Two).toBeDefined()
     await user.click(playerButton('Next'))
     expect(player()).toMatchObject({ song: 'Two', playing: true, time: 0 })
@@ -216,8 +230,9 @@ describe('DJ mode', () => {
 
   it('stops the mix and gives songs back their own tempo when turned off mid-mix', async () => {
     const { user } = await startDj([one, two])
-    await waitFor(() => expect(djStatus()).toMatch(/^DJ: 16-bar blend/))
-    playTo(240)
+    await waitFor(() => expect(djStatus()).toMatch(/^DJ: 32-bar blend/))
+    playTo(192)
+    playTo(224)
     await waitFor(() => expectPlaying('Two'))
     await user.click(djModeButton())
     expect(heard()).toEqual({ Two: { volume: 100, speed: 100, bass: true } })
@@ -234,6 +249,6 @@ describe('DJ mode', () => {
     const { desktop } = await startDj([one, { ...two, dj: undefined }])
     await waitFor(() => expect(djStatus()).toBe('DJ: Filter fade into Two at 4:08'))
     desktop.djDetailsFound('Two', two.dj)
-    await waitFor(() => expect(djStatus()).toBe('DJ: 16-bar blend into Two at 3:44'))
+    await waitFor(() => expect(djStatus()).toBe('DJ: 32-bar blend into Two at 3:12'))
   })
 })

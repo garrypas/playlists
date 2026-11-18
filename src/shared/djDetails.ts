@@ -32,6 +32,20 @@ export interface BeatGrid {
   phraseStart: number
   /** 0–1: the share of beats with a kick, in the bars that have a beat (breakdowns aren't counted against it). */
   confidence: number
+  /**
+   * How loud each bar is: how much energy each part of the song has. Missing from details found by older versions.
+   */
+  barLevels?: BarLevels
+}
+
+/** The level of every whole bar of a song's grid, in order. */
+export interface BarLevels {
+  /** Where the first bar starts: the first bar line at or after the start of the file. */
+  from: number
+  /** Each bar's level, in dB below full scale, to the end of what was analysed: the whole sound. */
+  db: number[]
+  /** The same for the low end (below 150 Hz): the kick and bassline. */
+  lowDb: number[]
 }
 
 /**
