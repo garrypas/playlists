@@ -35,6 +35,7 @@ These hold the detail this guide leaves out. Skip each file's frontmatter and re
 - `.claude/agents/data-api.md` — `PlaylistDatabase` methods, `playlists:*` IPC and validation, preload, the `PlaylistApi` contract, the fake desktop. Before adding or changing a window–database call
 - `.claude/skills/tempo-and-key/SKILL.md` — BPM and key detection and the shifted values shown after a tempo change
 - `.claude/skills/audio-engine/SKILL.md` — playback (one `<audio>` in the renderer, streamed by `playlist-audio://`), the tempo slider, platform limits, test stand-ins. Before any playback work
+- `.claude/skills/dj/SKILL.md` — DJ technique (beatmatching, 16-bar phrase matching, fade lengths, drop mixing, harmonic mixing) and the plan for DJ mode, which isn't built yet. Before any DJ-mode or transition work
 - `.claude/skills/frontend-design/SKILL.md` — visual design. Before building or reshaping UI
 - `.claude/agents/security.md` — secrets, SQL safety, logging and Electron/IPC hardening. Check changes to credentials, workflows, the schema, IPC or renderer privileges against it
 
