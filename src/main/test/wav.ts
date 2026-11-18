@@ -50,10 +50,22 @@ export interface SongPart {
   /** The beat of the part (from 0) on which the kick comes in. */
   kickFromBeat?: number
   /**
-   * A bass note on every off-beat, cut on the beat (as a sidechained trance bassline is). It starts from near silence,
-   * so it rises more sharply than the kick, which hits while the bass is still sounding; but the kick is louder.
+   * A bass note on every off-beat, ducked just before the beat (as a sidechained trance bassline is). It starts from
+   * near silence, so it rises more sharply than the kick, which hits while the bass is still fading; but the kick is
+   * louder.
    */
   offbeatBass?: boolean
+  /** An open hi-hat (a burst of noise) on every off-beat. */
+  hats?: boolean
+}
+
+// Noise that's the same on every run, so test files don't change.
+function noise(): () => number {
+  let seed = 1
+  return () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648
+    return (seed / 2147483648) * 2 - 1
+  }
 }
 
 /** A dance track at `bpm` made of `parts` one after another, after `silenceSeconds` of silence. */
@@ -63,7 +75,9 @@ export function song(bpm: number, parts: SongPart[], { silenceSeconds = 0 } = {}
   const seconds = silenceSeconds + parts.reduce((total, part) => total + part.bars * 4 * beatSeconds, 0)
   const samples = new Float32Array(Math.round(rate * seconds))
   let partStart = silenceSeconds
-  for (const { bars, kick = false, pad = false, level = 1, kickFromBeat = 0, offbeatBass = false } of parts) {
+  const hiss = noise()
+  for (const part of parts) {
+    const { bars, kick = false, pad = false, level = 1, kickFromBeat = 0, offbeatBass = false, hats = false } = part
     const partEnd = partStart + bars * 4 * beatSeconds
     for (let i = Math.round(partStart * rate); i < Math.min(samples.length, Math.round(partEnd * rate)); i++) {
       const time = i / rate
@@ -72,8 +86,12 @@ export function song(bpm: number, parts: SongPart[], { silenceSeconds = 0 } = {}
       const kickSample = kickOn ? Math.sin(2 * Math.PI * 70 * sinceBeat) * Math.exp(-25 * sinceBeat) * 0.6 : 0
       const padSample = pad ? Math.sin(2 * Math.PI * 55 * time) * 0.3 : 0
       const sinceOffbeat = sinceBeat - beatSeconds / 2
-      const bassSample = offbeatBass && sinceOffbeat >= 0 ? Math.sin(2 * Math.PI * 45 * sinceOffbeat) * 0.15 : 0
-      samples[i] = (kickSample + padSample + bassSample) * level
+      // Ducked over the last 10 ms before the beat (cutting it dead would click).
+      const duck = Math.min(1, (beatSeconds - sinceBeat) / 0.01)
+      const bassSample =
+        offbeatBass && sinceOffbeat >= 0 ? Math.sin(2 * Math.PI * 45 * sinceOffbeat) * 0.15 * duck : 0
+      const hatSample = hats && sinceOffbeat >= 0 ? hiss() * Math.exp(-60 * sinceOffbeat) * 0.15 : 0
+      samples[i] = (kickSample + padSample + bassSample + hatSample) * level
     }
     partStart = partEnd
   }

@@ -18,13 +18,13 @@ const structured = [
   { bars: 8, pad: true, level: 0.05 },
 ]
 // 138.7 BPM trance, DJ-friendly: 16 bars of kick alone, then a sidechained bassline on every off-beat (rising more
-// sharply than the kick, but quieter), a breakdown of the bassline alone, the kick and bassline again, and a 16-bar
-// outro of kick alone.
+// sharply than the kick, but quieter) with open hi-hats, a breakdown of the bassline alone, the kick, bassline and hats
+// again, and a 16-bar outro of kick alone.
 const trance = [
   { bars: 16, kick: true },
-  { bars: 32, kick: true, offbeatBass: true },
+  { bars: 32, kick: true, offbeatBass: true, hats: true },
   { bars: 16, offbeatBass: true },
-  { bars: 64, kick: true, offbeatBass: true },
+  { bars: 64, kick: true, offbeatBass: true, hats: true },
   { bars: 16, kick: true },
 ]
 // 126 BPM, after 1 s of silence: 16 bars of pad alone, 16 bars where the kick comes in on the third beat, an 8-bar

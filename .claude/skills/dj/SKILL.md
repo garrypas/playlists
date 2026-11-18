@@ -35,7 +35,7 @@ If the code and this file disagree, the code wins: say so, and fix this file in 
 | `src/shared/djDetails.ts` | `DjDetails`, `BeatGrid`, `DjSection`, `DjSectionKind`: what's known about a file for mixing. Shared, so the renderer can use it in DJ mode |
 | `src/main/trackRhythm.ts` | `detectRhythm(filePath)` → `{ bpm, dj }`: one decode, then BPM, the beat grid, phrase start, sections, drops, loudness and sound bounds. Run on the analysis worker as kind `rhythm` |
 | `src/main/trackRhythm.test.ts` | Detection on generated songs ("finding what a DJ needs to mix a song") |
-| `src/main/test/wav.ts` | `song(bpm, parts, { silenceSeconds })`: a generated dance track from parts in bars (kick, bass pad, level) |
+| `src/main/test/wav.ts` | `song(bpm, parts, { silenceSeconds })`: a generated dance track from parts in bars (kick, bass pad, off-beat bassline, off-beat hi-hats, level) |
 
 | `src/renderer/src/dj/djMix.ts` | Pure maths: `matchRate`, `keyAtRate`, `keysCompatible`, `planTransition`, `levelsAt`, `incomingTimeAt` / `outgoingTimeAt`, `nudgedRate`, `transitionName`; types `Deck`, `TransitionPlan`, `MixLevels` |
 | `src/renderer/src/dj/djMix.test.ts` | The maths, by musical behavior |
@@ -157,8 +157,14 @@ wall-clock time = now + (boundary − t) / rate
 2. **Rough tempo:** `music-tempo` on a 500 Hz low-pass (see `tempo-and-key` for its parameters). Only its tempo is used, as the centre of the search in step 4. Its beats wander: a line through them was 0.1–1.3% slow on two-thirds of real tracks.
 3. **Kicks:** a further 150 Hz low-pass. Kick strength at each hop is `ln(energy of the next 4 hops / energy of the 4 before)`, with silence before the file. Four hops (11.6 ms) is the shortest window that doesn't see a held bass note's own cycles as kicks.
 4. **Grid:**
-   - **Tempo and phase search** (`strongestLine`): every local peak of kick strength ≥ 0.5 is a candidate kick. For each tempo within ±4% of music-tempo's, in steps of 0.005%, the candidates are folded onto one beat by phase into 4 ms bins. The bin (plus half of each neighbour) with the most total strength wins. Only the right tempo keeps a whole song's kicks in one bin. About 0.1 s per song.
-   - **Kicks or off-beats** (`onTheBeat`): a sidechained or rolling bassline on the off-beat can rise more sharply than kicks that hit over a held bass, so the search can land half a beat out. The two halves of the beat are compared by the low band's level over the 40 ms after each beat (summed dB), and by how far it rises from the 50 ms before (from −60 to −10 ms). Each comparison is `(b − a) / (|a| + |b|)`, and the half with the larger sum of the two wins. Kicks are the loudest hits in the low end.
+   - **Tempo search** (`strongestLine`): every local peak of kick strength ≥ 0.5 is a candidate kick. For each tempo within ±4% of music-tempo's, in steps of 0.005%, the candidates are folded onto one beat by phase into 4 ms bins. The bin (plus half of each neighbour) with the most total strength wins. Only the right tempo keeps a whole song's kicks in one bin. About 0.1 s per song. Only its tempo is kept: its phase often follows a sidechained or rolling bassline, half a beat or a sixteenth away from the kicks.
+   - **Phase** (`kickPhase`): each of `kickPhases` (64) phases in the beat is scored on what marks a kick, averaged over every beat of the song:
+     - the low band's rise over 40 ms against the 50 ms before (−60 to −10 ms), and over 15 ms against the 20 ms before (−25 to −5 ms), in dB;
+     - its level over 40 ms an eighth of a beat later (the kick's body), weighted 2;
+     - the high band's rise (above `hatCutoffHz`, 2 kHz) half a beat later: off-beat hi-hats;
+     - minus the low band already rising just before (−30 to −5 ms against −70 to −40 ms): a bass swelling back after a duck.
+
+     Each score is smoothed (half of each neighbour added) and scaled by its mean and standard deviation across the phases before they're summed. Louder kicks (level at the beat, rises in raw power) scored worse on real music than sharper ones, so a song with an off-beat bassline and no hi-hats can still land on the bassline. The half-beat check it replaced (`onTheBeat`) could only move the line by half a beat, so a line that locked a sixteenth off stayed there: about 100 ms out on GP4S – Enliberate, which put every blend into it out of sync.
    - Refine three times: at every predicted beat, take the strongest kick within 30, 30, then 20 ms, placed between hops with a parabola. Refit through the kicks above the threshold, dropping any more than 20 ms off.
    - The threshold is a log ratio of a third of the 75th-percentile strength, clamped to 0.5–0.8. 0.8 is a kick that doubles the energy over a held bass note.
 5. **Phrase start** (`choosePhraseStart`):
@@ -170,7 +176,9 @@ wall-clock time = now + (boundary − t) / rate
    - The old measure compared 4-beat averages, with differences limited by `tanh`. Big changes saturated, so they peaked a beat early or late. The first kick also counted double, though a quarter of real tracks bring it in on beat 2, 3 or 4.
 6. **Sections and drops:** as in the table above. A single odd bar between two of the same kind is folded into them (a missed kick or a one-bar fill).
 
-**Accuracy, checked against rekordbox.** The reference is the beat grids in your library's `ANLZ0000.DAT` files, read-only, which number each beat 1–4 within its bar. The sample is 200 tracks never used for tuning:
+**Accuracy, checked against rekordbox.** The reference is the beat grids in your library's `ANLZ0000.DAT` files, read-only, which number each beat 1–4 within its bar. Each change is checked on 200 tracks never used to tune it.
+
+The tempo search and bar evidence (detector version 2), against music-tempo's own beats:
 
 | | Before | After |
 |---|---|---|
@@ -178,9 +186,20 @@ wall-clock time = now + (boundary − t) / rate
 | Same bar lines as rekordbox | 61 | 134 |
 | Grid on the off-beat | 37 | 20 |
 | Right beats, but the wrong one as bar 1 | 50 | 18 |
-| Same tempo, beats 50–170 ms apart (unresolved: the two detectors choose different hits) | 52 | 28 |
+| Same tempo, beats 50–170 ms apart (the two detectors choose different hits) | 52 | 28 |
 
-- Where the grids agree, the median offset is 0 ms.
+The phase from every point in the beat (`kickPhase`, version 3), against the half-beat check, on another 200 (it was tuned on 400 others):
+
+| | Before | After |
+|---|---|---|
+| Most beats within 25 ms of rekordbox's | 127 | 150 |
+| Same bar lines as rekordbox | 126 | 148 |
+| Grid on the off-beat | 12 | 15 |
+| Same tempo, beats a fraction of a beat apart | 37 | 11 |
+| Tempo within 0.02 BPM (unchanged) | 189 | 189 |
+
+- Where the grids agree, the median offset is 0 ms (10th–90th percentile ±15 ms).
+- An AAC file (`.m4a`) decodes with about 48 ms of encoder delay before the music, so a song bounced from bar 1 has its first beat near 0.05 s, not 0. Rekordbox's grid for a lossless copy of the same song starts at 0.
 - Rekordbox has no phrase analysis or cue points in this library, so which of the 16 bars starts the phrase is untested on real music.
 - **To repeat the check:**
   1. Parse `PQTZ` (beat number, tempo × 100, time in ms) from `~/Library/Pioneer/rekordbox/share/PIONEER/USBANLZ/*/*/ANLZ0000.DAT`.
@@ -188,7 +207,7 @@ wall-clock time = now + (boundary − t) / rate
   3. Run the built `out/main/analysisWorker.js` (`kind: 'rhythm'`) on the matching files.
 - Compare downbeats over the whole song, not near the first kick. Many intros fade in from noise, and a rounded rekordbox tempo drifts away from the real one.
 
-**Re-detection:** `rhythmDetectorVersion` (`app_meta.rhythm_detector`, currently 2) resets `dj_read` on every file once when raised. Files keep their old BPM and DJ details until the new ones arrive. Raise it whenever the grid, phrases or sections are found differently.
+**Re-detection:** `rhythmDetectorVersion` (`app_meta.rhythm_detector`, currently 3) resets `dj_read` on every file once when raised. Files keep their old BPM and DJ details until the new ones arrive. Raise it whenever the grid, phrases or sections are found differently.
 
 **Speed:**
 - About 1 s for a 6-minute song and 1.5 s for 10½ minutes, on an Apple Silicon Mac. That's checked on 46 real tracks, and a test requires a 6-minute song to take under 5 s.
@@ -286,7 +305,8 @@ Open: cue points (detected only, or user-editable? per file or per playlist entr
 ## Tests
 **Built** (`src/main/trackRhythm.test.ts`, "finding what a DJ needs to mix a song", real ffmpeg decoding of generated WAVs):
 - grids at 120 and 128 BPM starting at the first kick
-- a grid on the kicks, not on an off-beat bassline that rises more sharply (fails with the old ¼/½/¾ shift)
+- a grid on the kicks, not on an off-beat bassline that rises more sharply, with off-beat hi-hats as real trance has (fails with the old ¼/½/¾ shift). Without the hats, `kickPhase` lands on the bassline: a trade-off it makes for real music (see "Phase").
+- Synthetic songs (rolling, pumping or plucked basslines, buried kicks) didn't reproduce the sixteenth-off phase that `kickPhase` fixes on real tracks: the old search found their kicks too. That fix is checked against rekordbox instead.
 - a phrase start on the bar line where the music changes, not on a kick that comes in on beat 3 (fails with the old phrase rule)
 - Synthetic audio can't reproduce music-tempo's tempo drift: it's exact on clean beats, even with jittered kicks. So the tempo search is checked against rekordbox (above).
 - 5 ms phase accuracy over 64 bars

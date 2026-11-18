@@ -17,6 +17,8 @@ const maxSeconds = 1200
 // 150 Hz.
 const beatCutoffHz = 500
 const kickCutoffHz = 150
+// Hi-hats are placed using only what's above 2 kHz.
+const hatCutoffHz = 2000
 // Energy is summed in hops of 32 samples (2.9 ms), which sets how precisely a kick is placed before the grid is fitted.
 const hop = 32
 // A kick is where energy over 4 hops (11.6 ms) jumps compared with the 4 hops before it. A shorter window would see a
@@ -32,6 +34,8 @@ const tempoSearchStep = 0.00005
 const tempoSearchSteps = 800
 const phaseBinSeconds = 0.004
 const candidateKick = 0.5
+// Where in the beat the kick falls is chosen from this many evenly spaced phases.
+const kickPhases = 64
 // A change in level from one beat to the next this big (dB, full and low bands summed) suggests a bar line.
 const barStepDb = 6
 const beatsPerBar = 4
@@ -54,6 +58,7 @@ export async function detectRhythm(filePath: string): Promise<RhythmAnalysis> {
 function rhythmOfSamples(samples: Float32Array): RhythmAnalysis {
   const analysedSeconds = samples.length / sampleRate
   const full = new EnergyTrack(samples)
+  const high = new EnergyTrack(samples, twoPole('highpass', hatCutoffHz))
   lowPassInPlace(samples, beatCutoffHz)
   const tempo = musicTempo(samples)
   lowPassInPlace(samples, kickCutoffHz)
@@ -62,7 +67,7 @@ function rhythmOfSamples(samples: Float32Array): RhythmAnalysis {
 
   const sound = soundBounds(full)
   const loudness = loudnessOf(full)
-  const grid = sound && tempo ? beatGrid(tempo, onsets, low, analysedSeconds) : undefined
+  const grid = sound && tempo ? beatGrid(tempo, onsets, low, high, analysedSeconds) : undefined
   const bpm = grid ? round(grid.bpm, 1) : tempo && inRange(tempo.bpm) ? round(tempo.bpm, 1) : undefined
 
   const cuts = grid && sound ? barLines(grid, full, low, analysedSeconds, sound.start) : blockLines(analysedSeconds)
@@ -89,9 +94,13 @@ class EnergyTrack {
   readonly hops: Float64Array
   private readonly totals: Float64Array
 
-  constructor(samples: Float32Array) {
+  /** The energy of `samples`, or of what `filter` makes of them (without changing them). */
+  constructor(samples: Float32Array, filter?: (sample: number) => number) {
     this.hops = new Float64Array(Math.ceil(samples.length / hop))
-    for (let i = 0; i < samples.length; i++) this.hops[(i / hop) | 0] += samples[i] * samples[i]
+    for (let i = 0; i < samples.length; i++) {
+      const sample = filter ? filter(samples[i]) : samples[i]
+      this.hops[(i / hop) | 0] += sample * sample
+    }
     this.totals = new Float64Array(this.hops.length + 1)
     for (let i = 0; i < this.hops.length; i++) this.totals[i + 1] = this.totals[i] + this.hops[i]
   }
@@ -109,28 +118,34 @@ class EnergyTrack {
   }
 }
 
-// A two-pole (12 dB per octave) low-pass filter, keeping the kick and bass.
-function lowPassInPlace(samples: Float32Array, cutoffHz: number): void {
+// A two-pole (12 dB per octave) filter, fed one sample at a time.
+function twoPole(type: 'lowpass' | 'highpass', cutoffHz: number): (sample: number) => number {
   const w = (2 * Math.PI * cutoffHz) / sampleRate
+  const cos = Math.cos(w)
   const alpha = Math.sin(w) / Math.SQRT2
   const a0 = 1 + alpha
-  const b0 = (1 - Math.cos(w)) / 2 / a0
-  const b1 = (1 - Math.cos(w)) / a0
-  const a1 = (-2 * Math.cos(w)) / a0
+  const b0 = (type === 'lowpass' ? (1 - cos) / 2 : (1 + cos) / 2) / a0
+  const b1 = (type === 'lowpass' ? 1 - cos : -(1 + cos)) / a0
+  const a1 = (-2 * cos) / a0
   const a2 = (1 - alpha) / a0
   let x1 = 0
   let x2 = 0
   let y1 = 0
   let y2 = 0
-  for (let i = 0; i < samples.length; i++) {
-    const x = samples[i]
+  return (x) => {
     const y = b0 * x + b1 * x1 + b0 * x2 - a1 * y1 - a2 * y2
     x2 = x1
     x1 = x
     y2 = y1
     y1 = y
-    samples[i] = y
+    return y
   }
+}
+
+// Keeps the kick and bass.
+function lowPassInPlace(samples: Float32Array, cutoffHz: number): void {
+  const filter = twoPole('lowpass', cutoffHz)
+  for (let i = 0; i < samples.length; i++) samples[i] = filter(samples[i])
 }
 
 // How sharply the low end gets louder at each hop: the log of the energy over the next window against the one before.
@@ -226,11 +241,17 @@ interface Grid {
 
 // Fits a grid to the song's kicks: first the tempo and phase that line up the most kick strength across the whole song
 // (near music-tempo's tempo), then exactly, through the kicks found at each predicted beat.
-function beatGrid(tempo: TempoEstimate, onsets: Float32Array, low: EnergyTrack, seconds: number): Grid | undefined {
+function beatGrid(
+  tempo: TempoEstimate,
+  onsets: Float32Array,
+  low: EnergyTrack,
+  high: EnergyTrack,
+  seconds: number,
+): Grid | undefined {
   if (tempo.beats.length < 8) return undefined
   const strongest = strongestLine(onsets, 60 / tempo.bpm)
   if (!strongest) return undefined
-  let line = onTheBeat(strongest, low, seconds)
+  let line = kickPhase(strongest.period, low, high, seconds)
 
   // Kicks are looked for close to each predicted beat, so off-beat hits (a rolling bassline) aren't mistaken for them.
   for (const tolerance of [0.03, 0.03, 0.02]) {
@@ -286,27 +307,60 @@ function beatGrid(tempo: TempoEstimate, onsets: Float32Array, low: EnergyTrack, 
 // follows an off-beat bassline. Every sharp rise in the low end is a candidate kick; for each tempo tried (in steps of
 // 0.005%), they're folded onto one beat by their phase, and the 4 ms phase bin (with half its neighbours) holding the
 // most strength wins. Over a whole song, only the right tempo keeps the kicks in one bin.
-// The kicks or the off-beats: a rolling or sidechained bassline between the kicks can rise as sharply as the kicks
-// themselves, so the line through the most rises may be half a beat out. Kicks are the loudest hits in the low end, and
-// they jump further above what came just before, so the half of the beat where the low end is louder (summed in dB over
-// 40 ms) and rises more (from the 50 ms before) wins. Each is compared as a share of the two totals.
-function onTheBeat(line: Line, low: EnergyTrack, seconds: number): Line {
-  const totals = (origin: number): { level: number; rise: number } => {
-    let level = 0
-    let rise = 0
-    for (let time = origin - Math.floor(origin / line.period) * line.period; time + 0.04 < seconds; time += line.period) {
-      const after = Math.max(-100, low.db(time, time + 0.04))
-      level += after
-      rise += Math.max(0, after - Math.max(-100, low.db(time - 0.06, time - 0.01)))
+// Where in the beat the kicks fall. The line through the most sharp rises in the low end has the right tempo, but its
+// phase can follow a rolling or sidechained bassline instead: rising half a beat or a sixteenth away from the kicks
+// (a bass coming back after the kick's ducking rises more sharply than a kick buried under it). So every phase in the
+// beat (1/64 apart) is scored on what marks a kick, averaged over the whole song:
+// - the low end jumps (over 40 ms against the 50 ms before, and over 15 ms against the 20 ms before),
+// - and stays loud an eighth of a beat later (the kick's body; weighted twice),
+// - the hi-hats hit half a beat later (dance music's off-beat hats),
+// - and the low end isn't already rising just before (a bass swelling back after a duck), which counts against.
+// Each score is smoothed over neighbouring phases and put on a common scale (its spread across the beat) before
+// they're added up. Tuned against rekordbox's grids on 400 real tracks, then checked on 200 others: 150 have most
+// beats within 25 ms of rekordbox's, against 127 when the line's own phase or the half beat after it was used
+// (whichever had the louder, sharper low end). Louder kicks scored worse on real music than sharper ones, so a song
+// with an off-beat bassline and no hi-hats can still land on the bassline.
+function kickPhase(period: number, low: EnergyTrack, high: EnergyTrack, seconds: number): Line {
+  const rise = new Float64Array(kickPhases)
+  const sharpRise = new Float64Array(kickPhases)
+  const body = new Float64Array(kickPhases)
+  const hats = new Float64Array(kickPhases)
+  const swell = new Float64Array(kickPhases)
+  const db = (track: EnergyTrack, start: number, end: number): number => clampDb(track.db(start, end))
+  for (let phase = 0; phase < kickPhases; phase++) {
+    let beats = 0
+    // From the second beat, so there's always audio before it.
+    for (let time = period + (phase / kickPhases) * period; time + period / 2 + 0.04 < seconds; time += period) {
+      rise[phase] += Math.max(0, db(low, time, time + 0.04) - db(low, time - 0.06, time - 0.01))
+      sharpRise[phase] += Math.max(0, db(low, time, time + 0.015) - db(low, time - 0.025, time - 0.005))
+      body[phase] += db(low, time + period / 8, time + period / 8 + 0.04)
+      const hat = time + period / 2
+      hats[phase] += Math.max(0, db(high, hat, hat + 0.02) - db(high, hat - 0.04, hat - 0.005))
+      swell[phase] += Math.max(0, db(low, time - 0.03, time - 0.005) - db(low, time - 0.07, time - 0.04))
+      beats++
     }
-    return { level, rise }
+    for (const score of [rise, sharpRise, body, hats, swell]) score[phase] /= beats || 1
   }
-  const share = (a: number, b: number): number => (b - a) / (Math.abs(a) + Math.abs(b) || 1)
-  const on = totals(line.origin)
-  const off = totals(line.origin + line.period / 2)
-  return share(on.level, off.level) + share(on.rise, off.rise) > 0
-    ? { origin: line.origin + line.period / 2, period: line.period }
-    : line
+  const scale = (score: Float64Array): number[] => {
+    const smoothed = [...score].map(
+      (value, i) => value + 0.5 * (score[(i + 1) % kickPhases] + score[(i + kickPhases - 1) % kickPhases]),
+    )
+    const average = mean(smoothed)
+    const spread = Math.sqrt(mean(smoothed.map((value) => (value - average) ** 2))) || 1
+    return smoothed.map((value) => (value - average) / spread)
+  }
+  const [riseScale, sharpRiseScale, bodyScale, hatsScale, swellScale] = [rise, sharpRise, body, hats, swell].map(scale)
+  let best = 0
+  let bestScore = -Infinity
+  for (let phase = 0; phase < kickPhases; phase++) {
+    const score =
+      riseScale[phase] + sharpRiseScale[phase] + 2 * bodyScale[phase] + hatsScale[phase] - swellScale[phase]
+    if (score > bestScore) {
+      bestScore = score
+      best = phase
+    }
+  }
+  return { origin: (best / kickPhases) * period, period }
 }
 
 function strongestLine(onsets: Float32Array, approxPeriod: number): Line | undefined {

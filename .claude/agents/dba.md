@@ -82,7 +82,7 @@ Key/value table (`key TEXT PRIMARY KEY, value TEXT NOT NULL`) for one-off app st
 |---|---|
 | `starter_playlists_seeded` | `'1'` once the four starter playlists were created, so deleting them doesn't bring them back |
 | `tempo_detector` | Last `tempoDetectorVersion` applied by `retryMissingTempos()` (currently 2) |
-| `rhythm_detector` | Last `rhythmDetectorVersion` applied by `redetectRhythm()` (currently 2; missing counts as 1) |
+| `rhythm_detector` | Last `rhythmDetectorVersion` applied by `redetectRhythm()` (currently 3; missing counts as 1) |
 
 ### Mapping to TypeScript
 The window sees two reads: `list()`, and `getDjDetails(trackId)` (over `playlists:dj-details`, for DJ mode, one song at a time). The `list()` `SELECT` aliases columns to the camelCase `Playlist` / `PlaylistTrack` fields in `src/shared/playlist.ts`, with tracks ordered `position, id`. `added_at`, `created_at`, `playlists.position` and the `*_read` flags are not exposed. A column the window needs must be added to that `SELECT` and to the type.
