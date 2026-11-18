@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { DjDetails } from '../shared/djDetails'
 import type { Playlist } from '../shared/playlist'
 import { openPlaylistDatabase } from './playlistDatabase'
 import { mp3 } from './test/mp3'
@@ -61,16 +62,16 @@ vi.mock('electron', () => {
   }
 })
 
-// The worker thread loads the built analysisWorker.js, which only exists after `npm run build`, so tests detect tempos
-// and keys on the test's own thread instead. Detection itself is real.
+// The worker thread loads the built analysisWorker.js, which only exists after `npm run build`, so tests detect tempos,
+// DJ details and keys on the test's own thread instead. Detection itself is real.
 vi.mock('./backgroundAnalysis', async (importOriginal) => {
   const original = await importOriginal<typeof import('./backgroundAnalysis')>()
-  const { detectTempo } = await import('./trackTempo')
+  const { detectRhythm } = await import('./trackRhythm')
   const { detectKey } = await import('./trackKey')
   return {
     ...original,
     analyseInWorker: (_workerPath: string, kind: string, filePath: string) =>
-      kind === 'key' ? detectKey(filePath) : detectTempo(filePath),
+      kind === 'key' ? detectKey(filePath) : detectRhythm(filePath),
   }
 })
 
@@ -355,6 +356,25 @@ describe('song tempo', () => {
     const playlists = await invoke('playlists:list')
     expect(songIn(playlists, savedEarlier())?.bpm).toBeNull()
     expect(songIn(playlists, join(music, 'deleted.mp3'))?.bpm).toBeNull()
+  })
+})
+
+describe('song DJ details', () => {
+  it('are read by the window for a song whose beat has been found', async () => {
+    await vi.waitFor(async () => expect(songIn(await invoke('playlists:list'), beat100())?.bpm).not.toBeNull(), {
+      timeout: 10_000,
+    })
+    const song = songIn(await invoke('playlists:list'), beat100())!
+    const details = await invoke<DjDetails | null>('playlists:dj-details', song.id)
+    expect(details?.grid?.bpm).toBeCloseTo(100, 0)
+  })
+
+  it('are unknown for a song that isn’t saved', async () => {
+    expect(await invoke('playlists:dj-details', 99_999)).toBeNull()
+  })
+
+  it.each(['7', 0, 1.5])('rejects the song %j', async (trackId) => {
+    await expect(invoke('playlists:dj-details', trackId)).rejects.toThrow('Invalid track ID.')
   })
 })
 

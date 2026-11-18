@@ -109,6 +109,45 @@ Object.defineProperties(HTMLMediaElement.prototype, {
   },
 })
 
+// jsdom has no Web Audio. DJ mode only uses it for each deck's bass (a low-shelf filter fed by the deck's <audio>),
+// so this stand-in records each element's filter, which tests read through `testBassFilters` to hear the bass.
+class FakeAudioParam {
+  value = 0
+  setTargetAtTime(value: number): this {
+    this.value = value
+    return this
+  }
+}
+class FakeAudioNode {
+  connect<T>(destination: T): T {
+    return destination
+  }
+}
+declare global {
+  // eslint-disable-next-line no-var
+  var testBassFilters: WeakMap<HTMLMediaElement, { gain: FakeAudioParam }>
+}
+globalThis.testBassFilters = new WeakMap()
+class FakeAudioContext {
+  currentTime = 0
+  destination = new FakeAudioNode()
+  resume(): Promise<void> {
+    return Promise.resolve()
+  }
+  createBiquadFilter(): FakeAudioNode & { type: string; frequency: FakeAudioParam; gain: FakeAudioParam } {
+    return Object.assign(new FakeAudioNode(), { type: '', frequency: new FakeAudioParam(), gain: new FakeAudioParam() })
+  }
+  createMediaElementSource(element: HTMLMediaElement): FakeAudioNode {
+    const source = new FakeAudioNode()
+    source.connect = <T,>(filter: T): T => {
+      globalThis.testBassFilters.set(element, filter as unknown as { gain: FakeAudioParam })
+      return filter
+    }
+    return source
+  }
+}
+window.AudioContext = FakeAudioContext as unknown as typeof AudioContext
+
 // jsdom doesn't implement modal dialogs, pointer or drag events, or pointer capture.
 HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
   this.open = true

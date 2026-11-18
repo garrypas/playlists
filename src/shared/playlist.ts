@@ -1,3 +1,5 @@
+import type { DjDetails } from './djDetails'
+
 export interface PlaylistTrack {
   id: number
   filePath: string
@@ -52,6 +54,11 @@ export interface PlaylistApi {
   moveTrack(playlistId: number, trackId: number, toIndex: number): Promise<Playlist[]>
   /** Saves how much faster or slower (in percent) a song plays in its playlist. */
   setTrackTempo(trackId: number, percent: number): Promise<Playlist[]>
+  /**
+   * What's known about a song's audio for mixing it (beat grid, phrases, sections, drops), or null until its
+   * background analysis has run. Shared by every copy of the file.
+   */
+  djDetails(trackId: number): Promise<DjDetails | null>
   /** Moves a playlist to `toIndex` in the list of playlists. */
   move(id: number, toIndex: number): Promise<Playlist[]>
   /**

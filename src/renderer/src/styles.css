@@ -762,6 +762,19 @@ button {
   color: #8e8d85;
 }
 
+/* What DJ mode will do next, under the progress bar. One line, so the player bar keeps its height. */
+.dj-status {
+  width: min(310px, 100%);
+  margin: -2px 0 0;
+  overflow: hidden;
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .progress-track,
 .volume-track {
   height: 3px;

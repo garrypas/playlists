@@ -50,6 +50,9 @@ The reference below says what to check and what the codebase does today. When yo
 ## Rules: Electron and IPC hardening
 15. Keep `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`; the window-open, navigation, webview and permission denials in `index.ts`; and the production CSP in `electron.vite.config.ts`. Loosening any of them needs a specific, stated need, and never applies to production builds just to make dev mode work.
 16. Custom protocol handlers (`audioProtocol.ts`) resolve IDs through the database and must never serve a path taken from the URL.
+    - `playlist-audio:` is registered `corsEnabled` and answers `Access-Control-Allow-Origin: *`. DJ mode routes its `<audio crossOrigin="anonymous">` decks through Web Audio for the bass filters, and Web Audio hears only silence without CORS.
+    - That's acceptable only because the scheme is reachable solely from this app's own window (no navigation, popups or webviews), and it serves only saved songs and their artwork, by ID. Keep it that way, and never add credentials or cookies to it.
+    - `playlists:dj-details` returns one song's analysis by `requireId`'d track ID, read only.
 
 ## Checks to run for a full review
 1. `git ls-files` filtered for secret-looking file names (rule 2).

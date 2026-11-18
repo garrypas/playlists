@@ -1,4 +1,5 @@
 import type { DesktopApi } from '../../../preload'
+import type { DjDetails } from '../../../shared/djDetails'
 import type { Playlist, PlaylistTrack } from '../../../shared/playlist'
 
 export type SongSpec =
@@ -15,6 +16,8 @@ export type SongSpec =
       key?: string | null
       /** How much faster or slower (percent) it plays in this playlist. */
       tempo?: number
+      /** What background analysis found for mixing it; unknown (null) if left out. */
+      dj?: DjDetails
     }
 
 export interface FakeDesktop {
@@ -29,6 +32,8 @@ export interface FakeDesktop {
   tempoDetected: (songTitle: string, bpm: number | undefined) => void
   /** The main process finished finding a song's key and tells the window (`key` undefined: no key fits it). */
   keyDetected: (songTitle: string, key: string | undefined) => void
+  /** The main process finished finding a song's DJ details (beat grid, phrases, drops) and tells the window. */
+  djDetailsFound: (songTitle: string, details: DjDetails) => void
   /** Makes the next call to the main process fail, the way Electron reports it. */
   failNext: (channel: string, message: string) => void
   calls: string[]
@@ -43,6 +48,8 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
   let failure: { channel: string; message: string } | null = null
   const calls: string[] = []
   const changeListeners = new Set<(playlists: Playlist[]) => void>()
+  // DJ details belong to the file, like the main process keeps them.
+  const djDetails = new Map<string, DjDetails>()
 
   function track(spec: SongSpec, position: number, filePath?: string): PlaylistTrack {
     const {
@@ -56,8 +63,10 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
       bpm = null,
       key = null,
       tempo = 0,
+      dj,
     } = typeof spec === 'string' ? { title: spec } : spec
     const id = nextTrackId++
+    if (dj) djDetails.set(filePath ?? `/music/${title}.mp3`, dj)
     allTitles.set(id, title)
     return {
       id,
@@ -158,6 +167,11 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
           if (!song) throw new Error('Song not found.')
           song.tempo = Math.round(percent * 10) / 10 || 0
         }),
+      djDetails: async (trackId) => {
+        calls.push('playlists:dj-details')
+        const song = store.flatMap((item) => item.tracks).find((item) => item.id === trackId)
+        return song ? structuredClone(djDetails.get(song.filePath) ?? null) : null
+      },
       move: (id, toIndex) =>
         call('playlists:move', () => {
           const [moved] = store.splice(store.indexOf(find(id)), 1)
@@ -196,6 +210,11 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
     titleOf: (songId) => allTitles.get(songId),
     tempoDetected: (songTitle, bpm) => detected(songTitle, { bpm: bpm ?? null }),
     keyDetected: (songTitle, key) => detected(songTitle, { key: key ?? null }),
+    djDetailsFound: (songTitle, details) => {
+      const song = store.flatMap((playlist) => playlist.tracks).find((item) => item.title === songTitle)!
+      djDetails.set(song.filePath, details)
+      detected(songTitle, {})
+    },
     pickFiles: (paths) => {
       picked = paths
     },

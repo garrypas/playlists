@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect } from 'vitest'
+import type { DjDetails } from '../../../shared/djDetails'
 import App from '../App'
 import { createFakeDesktop, type FakeDesktop, type SongSpec } from './fakeDesktop'
 
@@ -25,8 +26,60 @@ export async function renderApp(playlists: { title: string; songs?: SongSpec[] }
 
 let current: FakeDesktop
 
+// The deck playing the current song (the other deck only plays during a DJ-mode mix).
 function audio(): HTMLAudioElement {
-  return document.querySelector('audio')!
+  return document.querySelector<HTMLAudioElement>('audio[data-deck="live"]')!
+}
+
+function songOn(deck: HTMLAudioElement): string | undefined {
+  const id = /^playlist-audio:\/\/track\/(\d+)$/.exec(deck.src)?.[1]
+  return id ? current.titleOf(Number(id)) : undefined
+}
+
+/**
+ * Every song you can hear right now, by title: how loud (0–100), how fast (percent of normal speed) and whether its
+ * bass is in (DJ mode cuts one song's bass while two play). Songs playing silently aren't heard.
+ */
+export function heard(): Record<string, { volume: number; speed: number; bass: boolean }> {
+  const songs: Record<string, { volume: number; speed: number; bass: boolean }> = {}
+  for (const deck of document.querySelectorAll('audio')) {
+    const volume = deck.muted ? 0 : Math.round(deck.volume * 100)
+    const song = songOn(deck)
+    if (deck.paused || volume === 0 || !song) continue
+    const bassDb = globalThis.testBassFilters.get(deck)?.gain.value ?? 0
+    songs[song] = { volume, speed: Math.round(deck.playbackRate * 1000) / 10, bass: bassDb > -6 }
+  }
+  return songs
+}
+
+export function djModeButton(): HTMLElement {
+  return screen.getByRole('button', { name: 'DJ mode' })
+}
+
+/** What DJ mode says it's doing, e.g. "DJ: 16-bar blend into Two at 3:44"; undefined while it's off. */
+export function djStatus(): string | undefined {
+  return announcements().find((text) => text.startsWith('DJ:'))
+}
+
+/**
+ * What background analysis finds in a steady dance track: `bars` bars of kicks at `bpm` from `firstBeat`, with
+ * phrases from `phraseStart` and any drops (seconds).
+ */
+export function djTrack(
+  bpm: number,
+  { bars, firstBeat = 0, phraseStart = firstBeat, drops = [] }: { bars: number; firstBeat?: number; phraseStart?: number; drops?: number[] },
+): DjDetails {
+  const beat = 60 / bpm
+  const lastBeat = firstBeat + (bars * 4 - 1) * beat
+  return {
+    soundStart: firstBeat,
+    soundEnd: lastBeat + beat,
+    loudness: -9,
+    grid: { bpm, firstBeat, lastBeat, phraseStart, confidence: 0.95 },
+    sections: [{ kind: 'beat', start: firstBeat, end: lastBeat + beat }],
+    drops,
+    analysedSeconds: lastBeat + beat + 5,
+  }
 }
 
 /**
@@ -42,9 +95,8 @@ export function player(): {
   speed: number
   keepsPitch: boolean
 } {
-  const id = /^playlist-audio:\/\/track\/(\d+)$/.exec(audio().src)?.[1]
   return {
-    song: id ? current.titleOf(Number(id)) : undefined,
+    song: songOn(audio()),
     playing: !audio().paused,
     time: audio().currentTime,
     volume: audio().muted ? 0 : Math.round(audio().volume * 100),
@@ -88,10 +140,15 @@ export function songLoaded(durationSeconds: number): void {
   fireEvent.loadedMetadata(audio())
 }
 
-/** Playback has reached `seconds` into the song. */
+/** Playback has reached `seconds` into the song. A song mixing in on the other deck moves on by the same real time. */
 export function playTo(seconds: number): void {
-  audio().currentTime = seconds
-  fireEvent.timeUpdate(audio())
+  const live = audio()
+  const realSeconds = (seconds - live.currentTime) / live.playbackRate
+  for (const deck of document.querySelectorAll('audio')) {
+    if (deck !== live && !deck.paused && realSeconds > 0) deck.currentTime += realSeconds * deck.playbackRate
+  }
+  live.currentTime = seconds
+  fireEvent.timeUpdate(live)
 }
 
 export function songEnds(): void {

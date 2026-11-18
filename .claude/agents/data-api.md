@@ -25,7 +25,7 @@ The reference below is meant to answer most questions without reading code. When
 | `src/renderer/src/test/fakeDesktop.ts` | In-memory stand-in for main used by renderer tests; must follow the same contract |
 
 ## The contract
-- **Full list, every time.** Every mutating method returns `Promise<Playlist[]>`: the whole, updated list from `PlaylistDatabase.list()`. The renderer replaces its state with it; there are no partial updates or patches.
+- **Full list, every time.** Every mutating method (all but `list` and the read-only `djDetails`) returns `Promise<Playlist[]>`: the whole, updated list from `PlaylistDatabase.list()`. The renderer replaces its state with it; there are no partial updates or patches.
 - **Background changes are pushed.** When main changes data on its own (a detected BPM or key), it sends the full list on `playlists:changed`. `onChanged(listener)` subscribes and returns an unsubscribe function. The renderer applies it the same way as a call result.
 - **Songs are referred to by track `id`, never by path.** The only call that introduces paths is `addAudioFiles(playlistId)`, and the paths come from the native dialog inside main.
 - **Errors** are thrown as `Error` with a user-facing message (e.g. "Playlist names must be 1–100 characters.", "Song not found."). Electron wraps them in the renderer's rejected promise; the renderer shows them, and tests assert on them.
@@ -38,16 +38,17 @@ The reference below is meant to answer most questions without reading code. When
 | `rename(id, title)` | `playlists:rename` | `requireId`, `requireString` | `rename(id, title)` | Same name rules as create |
 | `remove(id)` | `playlists:remove` | `requireId` | `remove(id)` | Deletes the playlist and its songs |
 | `move(id, toIndex)` | `playlists:move` | `requireId`, `requireIndex` | `movePlaylist(id, toIndex)` | Moves to `toIndex`, clamped to the end; renumbers all |
-| `addAudioFiles(id)` | `playlists:add-audio-files` | `requireId` | `addAudioFiles(id, paths, tags)` | Shows the native dialog (mp3, m4a, aac, wav, aiff, flac, ogg, opus; multi-select), reads tags, adds the files at the end, then starts BPM/key scanning. Cancel returns the list unchanged. Files already in the playlist are skipped |
+| `addAudioFiles(id)` | `playlists:add-audio-files` | `requireId` | `addAudioFiles(id, paths, tags)` | Shows the native dialog (mp3, m4a, aac, wav, aiff, flac, ogg, opus; multi-select), reads tags, adds the files at the end, then starts BPM/DJ-detail and key scanning. Cancel returns the list unchanged. Files already in the playlist are skipped |
 | `addTrack(playlistId, trackId)` | `playlists:add-track` | `requireId` ×2 | `addTrack(playlistId, trackId)` | Copies a saved song to the end of another playlist; skipped if already there; the copy starts at tempo 0 |
 | `removeTrack(playlistId, trackId)` | `playlists:remove-track` | `requireId` ×2 | `removeTrack(playlistId, trackId)` | Removes the song only if it's in that playlist (no-op otherwise) |
 | `moveTrack(playlistId, trackId, toIndex)` | `playlists:move-track` | `requireId` ×2, `requireIndex` | `moveTrack(...)` | Moves within the playlist, clamped; "Song not found." if it isn't there |
 | `setTrackTempo(trackId, percent)` | `playlists:set-track-tempo` | `requireId`, `requireTempo` | `setTrackTempo(trackId, percent)` | One entry's tempo change, ±`MAX_TEMPO_CHANGE`, rounded to 0.1 |
+| `djDetails(trackId)` | `playlists:dj-details` | `requireId` | `getDjDetails(trackId)` | Read only, so it returns the song's `DjDetails` (`src/shared/djDetails.ts`), not the list. Null until analysed, or for an unknown ID. Kept out of `list()` because they're 0.5–3 kB per file; DJ mode asks for the playing and next songs only |
 | `onChanged(listener)` | `playlists:changed` (main → window) | — | — | Full list after background updates |
 
 `window.desktop.getAppInfo()` (`app:get-info`: name, version, platform) is the only other call on the bridge.
 
-**Main-only methods** (no IPC): `filesNeedingTags`/`saveTags` (launch), `filesNeedingTempo`/`saveTempo` and `filesNeedingKey`/`saveKey` (background scanners, followed by `sendPlaylistsToWindows()`), `getTrackFilePath` (audio protocol), `close` (`before-quit`).
+**Main-only methods** (no IPC): `filesNeedingTags`/`saveTags` (launch), `filesNeedingRhythm`/`saveRhythm` (BPM and DJ details) and `filesNeedingKey`/`saveKey` (background scanners, followed by `sendPlaylistsToWindows()`), `getTrackFilePath` (audio protocol), `close` (`before-quit`).
 
 ## Validation
 It happens twice, and both layers stay:
@@ -60,7 +61,7 @@ Playlists and tracks both have a `position`. New items go at max + 1; moves spli
 ## Tests
 - `src/main/index.test.ts`: imports the real `./index` with `electron` mocked (dialog results via `electron.openDialogResult`, `userData` in a temp folder) and `./backgroundAnalysis` mocked so detection runs on the test thread. Seeds a database with `openPlaylistDatabase` before import to simulate an older version's data. Covers handler validation and background pushes on `playlists:changed`.
 - `src/main/playlistDatabase.test.ts`: each method's behavior and error messages against a real database (see `dba.md`).
-- Renderer tests never touch main. `fakeDesktop.ts` implements `DesktopApi` in memory: every change returns the full list, duplicates in a playlist are ignored, a copied song starts at tempo 0. Helpers: `pickFiles(paths)` (next dialog result; empty means cancel), `failNext(channel, message)` (next call rejects like Electron), `tempoDetected` / `keyDetected` (simulate `playlists:changed`), `saved()`, `idOf(title)`, `calls`.
+- Renderer tests never touch main. `fakeDesktop.ts` implements `DesktopApi` in memory: every change returns the full list, duplicates in a playlist are ignored, a copied song starts at tempo 0. Helpers: `pickFiles(paths)` (next dialog result; empty means cancel), `failNext(channel, message)` (next call rejects like Electron), `tempoDetected` / `keyDetected` / `djDetailsFound` (simulate `playlists:changed`), `saved()`, `idOf(title)`, `calls`. Song specs take `dj` (a `DjDetails`, kept per file path like main) for `djDetails`.
 
 ## Pitfalls
 - **Never accept a path over IPC.** Take a track or playlist ID and look the path up in main (`getTrackFilePath`).
