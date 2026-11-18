@@ -229,7 +229,9 @@ The phase from every point in the beat (`kickPhase`, version 3), against the hal
   - The outgoing song's grid is used only if the file isn't longer than `analysedSeconds`.
   - The incoming song must be within ±10% after `matchRate` (which tries ×1, ×2 and ÷2).
   - Keys are compared at their played speeds (`keyAtRate`, rounded to a semitone) with `keysCompatible`: the same code, ±1 with the same letter, or the same number with the other letter. Unknown → undefined.
-- **Mix-out line:** the last line every N bars from `phraseStart`, at or before the end of the last bar of beats (`lastBeat` + 1 beat, capped at `soundEnd`/duration).
+- **Mix-out line:** the last line every N bars from `phraseStart`, at or before where the music ends (`musicEnd`). That's the end of the last `beat` or `beatless` section, or of the last bar of beats if later, capped at `soundEnd`/duration.
+  - An outro that drops the kick but carries on still counts, so the mix runs over it as a DJ's would. Day Seven's kick stops 10 bars before its pads do; ending at its last kick put the blend 16–32 bars early, over its last main section.
+  - A `quiet` fade-out doesn't count.
 - **Order of preference:**
   1. **Blend** whenever the tempos match: 32 bars, or 16 when the keys clash (they overlap for less time). It ends on the mix-out line for that length. Swap halfway. Falls to 16, then 8 bars if the longer one has passed or doesn't fit the incoming song (the user asked for blends longer than 8 bars).
      - **Where the incoming song comes in** (`entryPoint`), as a DJ cues it: its `phraseStart`, so phrase meets phrase, unless its intro would take over with clearly less energy than the outgoing song has.

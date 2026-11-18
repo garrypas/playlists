@@ -137,6 +137,20 @@ describe('planning a transition', () => {
     expect(planTransition(...compatible, 230)).toMatchObject({ kind: 'blend', bars: 8, startAt: 240 })
   })
 
+  it('mixes over an outro that carries on after the kick stops, ending where the music does', () => {
+    // Kicks for 150 bars (to 300 s), then 10 bars of pads without them, to 320 s: a 32-bar phrase line.
+    const outro = track(120, 160, { beatless: [[150, 160]] })
+    outro.grid!.lastBeat = 299.5
+    expect(planTransition(deck(outro), deck(track(120, 64)), 10)).toMatchObject({ kind: 'blend', startAt: 256, endAt: 320 })
+  })
+
+  it('ends the mix before a fade into near silence, on the last phrase line with music', () => {
+    const fade = track(120, 160, { beatless: [[150, 160]] })
+    fade.grid!.lastBeat = 299.5
+    fade.sections[1] = { ...fade.sections[1], kind: 'quiet' }
+    expect(planTransition(deck(fade), deck(track(120, 64)), 10)).toMatchObject({ kind: 'blend', startAt: 192, endAt: 256 })
+  })
+
   describe('choosing where the next song comes in', () => {
     // 32-bar blends from 192 s; a bar is 2 s in both songs, so the next song plays 64 s (32 bars) of itself.
     const quietFor = (bars: number) => (bar: number) => (bar < bars ? -18 : -9)

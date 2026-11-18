@@ -129,14 +129,23 @@ function usableGrid(details: DjDetails | null): BeatGrid | null {
 }
 
 /**
- * The last line every `bars` bars (counted from the phrase start) at or before the end of the song's last bar of
- * beats (or its end, if sooner): where a mix out of the song should finish.
+ * Where a song's music ends: the end of its last section with a beat or sound at its usual level, or of its last bar
+ * of beats if that's later, and never after `songEnd`. An outro that drops the kick but carries on (pads, the
+ * bassline) is still music to mix over; a fade into near silence isn't.
  */
-function mixOutLine(grid: BeatGrid, bars: number, songEnd: number): number {
-  const beat = secondsPerBeat(grid.bpm)
-  const limit = Math.min(grid.lastBeat + beat, songEnd) + 0.05
-  const step = bars * 4 * beat
-  return grid.phraseStart + Math.floor((limit - grid.phraseStart) / step) * step
+function musicEnd(details: DjDetails, grid: BeatGrid, songEnd: number): number {
+  const lastBar = grid.lastBeat + secondsPerBeat(grid.bpm)
+  const sounding = details.sections.filter((section) => section.kind === 'beat' || section.kind === 'beatless')
+  return Math.min(Math.max(lastBar, sounding.at(-1)?.end ?? lastBar), songEnd)
+}
+
+/**
+ * The last line every `bars` bars (counted from the phrase start) at or before `end`, where the song's music ends:
+ * where a mix out of the song should finish.
+ */
+function mixOutLine(grid: BeatGrid, bars: number, end: number): number {
+  const step = bars * 4 * secondsPerBeat(grid.bpm)
+  return grid.phraseStart + Math.floor((end + 0.05 - grid.phraseStart) / step) * step
 }
 
 /**
@@ -225,6 +234,7 @@ export function planTransition(outgoing: Deck, incoming: Deck, now: number): Tra
 
   if (outGrid) {
     const outBar = 4 * secondsPerBeat(outGrid.bpm)
+    const outEnd = musicEnd(outgoing.details!, outGrid, songEnd)
     const matched = inGrid ? matchRate(outGrid.bpm * outgoing.rate, inGrid.bpm) : undefined
     const incomingRate = matched ?? incoming.rate
     const ratio = incomingRate / outgoing.rate
@@ -235,7 +245,7 @@ export function planTransition(outgoing: Deck, incoming: Deck, now: number): Tra
       const outKey = outgoing.key === null ? null : (keyAtRate(outgoing.key, outgoing.rate) ?? null)
       // Clashing keys get a shorter blend, so they overlap for less time.
       for (const bars of keysCompatible(outKey, inKey) === false ? CLASHING_BLEND_BARS : BLEND_BARS) {
-        const end = mixOutLine(outGrid, bars, songEnd)
+        const end = mixOutLine(outGrid, bars, outEnd)
         const startAt = end - bars * outBar
         if (startAt < earliest || startAt < outGrid.firstBeat - 0.05) continue
         if (inGrid.phraseStart + (end - startAt) * ratio > incoming.duration) continue
@@ -245,7 +255,7 @@ export function planTransition(outgoing: Deck, incoming: Deck, now: number): Tra
       }
     }
 
-    const end = mixOutLine(outGrid, 16, songEnd)
+    const end = mixOutLine(outGrid, 16, outEnd)
     const soundStart = incoming.details?.soundStart ?? 0
     const opensBeatless =
       !inGrid || soundStart <= inGrid.firstBeat - BEATLESS_INTRO_BARS * 4 * secondsPerBeat(inGrid.bpm)
