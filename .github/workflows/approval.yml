@@ -1,0 +1,90 @@
+name: Approval
+
+# Sets the required "Approval" commit status on a PR's latest commit. The `main` ruleset (.github/rulesets/main.json)
+# blocks merging until it passes. GitHub doesn't let authors approve their own PRs, so this check lets any maintainer
+# (anyone with write access, the author included) approve:
+# - comment `/approve` on the PR, or add the `approved` label; and
+# - pushing new commits removes the label, so the new code needs approving again.
+#
+# pull_request_target runs this file from `main` with a token that can set statuses, even for PRs from forks. That's
+# safe only because nothing here checks out or runs the PR's code. Keep it that way (.claude/agents/security.md).
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: approval-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  approval:
+    name: Approval
+    if: github.event_name == 'pull_request_target' || (github.event.issue.pull_request && contains(github.event.comment.body, '/approve'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      statuses: write
+      pull-requests: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      EVENT: ${{ github.event_name }}
+      ACTION: ${{ github.event.action }}
+      ACTOR: ${{ github.event.sender.login }}
+      PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+      # Passed as data, never interpolated into the script.
+      COMMENT: ${{ github.event.comment.body }}
+    steps:
+      - name: Set the Approval status
+        shell: bash
+        run: |
+          set -euo pipefail
+          label=approved
+
+          # Whether ACTOR may approve: write, maintain or admin on this repo.
+          can_approve() {
+            local permission
+            permission=$(gh api "repos/$GH_REPO/collaborators/$ACTOR/permission" --jq .permission 2>/dev/null || echo none)
+            [[ "$permission" == admin || "$permission" == write || "$permission" == maintain ]]
+          }
+
+          # Labels set with this token don't start new runs, so each event works out the status itself.
+          sha=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
+          labels=$(gh pr view "$PR" --json labels --jq '[.labels[].name] | join(",")')
+          has_label=false
+          [[ ",$labels," == *",$label,"* ]] && has_label=true
+
+          if [[ "$EVENT" == issue_comment ]]; then
+            trimmed=$(printf '%s' "$COMMENT" | tr -d '[:space:]')
+            if [[ "$trimmed" != /approve ]]; then
+              echo "Not an approval comment."
+              exit 0
+            fi
+            if ! can_approve; then
+              echo "Only maintainers can approve; ignoring the comment."
+              exit 0
+            fi
+            gh label create "$label" --color 2da44e --description "Approved for merging" 2>/dev/null || true
+            gh pr edit "$PR" --add-label "$label"
+            has_label=true
+          elif [[ "$ACTION" == synchronize && "$has_label" == true ]]; then
+            gh pr edit "$PR" --remove-label "$label"
+            has_label=false
+          elif [[ "$ACTION" == labeled && "$has_label" == true ]] && ! can_approve; then
+            # Triage-only collaborators can add labels but can't approve.
+            gh pr edit "$PR" --remove-label "$label"
+            has_label=false
+          fi
+
+          if [[ "$has_label" == true ]]; then
+            state=success; description="Approved"
+          else
+            state=pending; description="Waiting for a maintainer to comment /approve"
+          fi
+          gh api "repos/$GH_REPO/statuses/$sha" -f state="$state" -f context=Approval -f description="$description" >/dev/null
+          echo "Approval: $state for $sha"
