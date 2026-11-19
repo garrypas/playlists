@@ -12,6 +12,9 @@ release/
 .env.*
 *.key
 *.pem
+*.p12
+*.pfx
+*.keystore
 credentials.json
 service-account*.json
 .zshrc

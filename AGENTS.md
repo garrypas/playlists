@@ -71,11 +71,12 @@ These hold the detail this guide leaves out. Skip each file's frontmatter and re
 
 ## Workflow for changes
 
-1. Work in a loop: small change, run the checks, read failures, fix, repeat until all pass. For multi-step tasks, write the done criteria first (tests added and passing, typecheck and build clean, docs updated) and report done only when all are true. If stuck, write down the blocker, what was tried and what's next. Ask the user about scope, permissions or network access instead of looping.
+1. Work in a loop: small change, run the checks, read failures, fix, repeat until all pass. For multi-step tasks, write the done criteria first (tests added and passing, typecheck and build clean, docs updated, security review done) and report done only when all are true. If stuck, write down the blocker, what was tried and what's next. Ask the user about scope, permissions or network access instead of looping.
 2. Every behavior change adds or updates tests; every bug fix gets a test that fails without it. Run `npm test`, `npm run typecheck` and `npm run build` before calling code done.
 3. For UI changes, check the result in `npm run dev`.
 4. Keep `.claude/agents/product.md` current whenever user-visible behavior changes or the user states a requirement or decision: move shipped items from "Not built" to "Current behavior" (behavior and edge cases, not implementation), add gaps to "Not built" and constraints to "Constraints that shape product scope". One bullet per feature; edit, don't duplicate.
 5. Keep the technical docs in `.claude/agents/` and `.claude/skills/` current. Each lists its files in the first column of its "## Files" table (backticked paths; a trailing `/` covers a folder), which a Claude Code hook reads, so keep it accurate when files move. When a change to those files alters flow, schema, constants, algorithms, file names, tests or pitfalls, update the doc in the same task. A substantial new feature area gets its own doc in the same format (frontmatter, files table, end-to-end flow, data, algorithms, tests, pitfalls, recipes, "Keeping this file current").
+6. Finish every task with a security review of its changes (uncommitted changes and any commits made in the task), after the checks pass and before reporting done. Review the diff against `.claude/agents/security.md` ("How to work", reviewing a change), fix what it finds and re-run the checks; report findings that need the user's decision. Say which rules were checked and what was found, or that nothing was found. Skip it only for changes that can't affect security, such as wording-only edits to prose docs, and say so.
 
 ## Product decisions and domain terms
 

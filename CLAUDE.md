@@ -8,4 +8,5 @@
 - **Hooks** (registered in `.claude/settings.json`):
   - `.claude/hooks/guard-outside-repo.mjs` — PreToolUse hook that makes Claude Code ask before writing outside this repo or running unsandboxed shell commands.
   - `.claude/hooks/check-agent-docs.mjs` — Stop hook that sends Claude back once when files a technical doc covers changed but the doc didn't (`AGENTS.md`, "Workflow for changes" step 5).
+  - `.claude/hooks/check-security-review.mjs` — Stop hook that reminds Claude, by sending it back once, when a turn ends with changes that haven't had a security review (`AGENTS.md`, "Workflow for changes" step 6). Run the review with the `security` subagent; the hook looks for that call (or the `security-review` skill) in the turn.
 - **Ralph loops:** do the loop in `AGENTS.md` step 1 with the `ralph-loop` plugin (enabled in `.claude/settings.json`). Start one with `/ralph-loop "<task, with its done criteria>" --completion-promise "DONE" --max-iterations 20`. Output `<promise>DONE</promise>` only when the done criteria are all true, never to escape the loop. Cancel with `/cancel-ralph`.

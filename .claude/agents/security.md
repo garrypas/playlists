@@ -11,7 +11,7 @@ You review and advise; you don't edit files. Bash is only for read-only inspecti
 The reference below says what to check and what the codebase does today. When you need detail, open only the files named here. If the code and this file disagree, the code wins: say so and name the drift, so the parent session can fix this file. Schema and migrations are covered in `.claude/agents/dba.md`, and IPC calls and validation in `.claude/agents/data-api.md`; use them for detail and apply the rules below on top.
 
 ## How to work
-- **Reviewing a change:** check the diff (`git diff`, `git diff --staged`, or the commits named) against every rule below that applies. Report each finding with file:line, the rule broken, the concrete risk, and the fix. Say plainly when nothing was found, and which rules you checked.
+- **Reviewing a change:** every task ends with this review (`AGENTS.md`, "Workflow for changes" step 6). Check the diff (`git diff`, `git diff --staged`, or the commits named) against every rule below that applies. Report each finding with file:line, the rule broken, the concrete risk, and the fix. Say plainly when nothing was found, and which rules you checked.
 - **Planning a change:** list the rules it touches and what the change must do to satisfy them, including the tests that prove it (`AGENTS.md`: test behavior, not implementation).
 - **Never repeat a secret.** When you find a credential, report its file, line, commit and kind (e.g. "GitHub token"), with at most the first 4 characters. Don't print the value, and don't read files Claude Code's settings deny (`.env`, `.env.*`, `secrets/`, `credentials.json`, `.aws/`, `.ssh/`): report that they exist and whether `git ls-files` shows them tracked.
 - Rank findings by severity: a real exposed secret or a path from the renderer to arbitrary files or SQL first; hardening gaps last.
@@ -19,9 +19,10 @@ The reference below says what to check and what the codebase does today. When yo
 ## Files
 | File | Role |
 |---|---|
-| `.gitignore` | Keeps `.env`, `.env.*`, `*.key`, `*.pem`, `credentials.json`, `service-account*.json`, `.aws/`, `.netrc`, `.npmrc`, `.ssh/` out of git |
+| `.gitignore` | Keeps `.env`, `.env.*`, `*.key`, `*.pem`, `*.p12`, `*.pfx`, `*.keystore`, `credentials.json`, `service-account*.json`, `.aws/`, `.netrc`, `.npmrc`, `.ssh/` out of git |
 | `.claude/settings.json` | Sandbox on; denies reading secret files and `git push`/`reset`/`clean`, `rm -rf`; asks before `curl`/`wget`; registers the hooks; enables plugins (`audiorective`, and Anthropic's `ralph-loop` and `frontend-design` from `claude-plugins-official`). Plugin hooks run outside the sandbox: `ralph-loop` adds a bash Stop hook that reads the transcript and `.claude/ralph-loop.local.md` (git-ignored). Review any new plugin's hooks and scripts before enabling it |
 | `.claude/hooks/guard-outside-repo.mjs` | Makes Claude Code ask before writing outside the repo or running unsandboxed commands |
+| `.claude/hooks/check-security-review.mjs` | Stop hook reminding Claude of `AGENTS.md` step 6: sends Claude back once to run this reviewer when a turn ends with changes (a working-tree snapshot, state kept in the git folder) that weren't reviewed in that turn. A reminder, not enforcement: a flagged snapshot isn't flagged again. Its snapshot writes unreferenced blobs of untracked files into `.git/objects` (removed by `git gc`), so secret-looking files must stay git-ignored |
 | `.github/workflows/` | CI and release. Release builds use no certificate (`CSC_IDENTITY_AUTO_DISCOVERY: 'false'`; macOS is ad-hoc signed via `build.mac.identity: "-"` in `package.json`) and no repository secrets; workflows declare explicit `permissions` |
 | `.github/dependabot.yml` | Dependabot security updates only (npm and GitHub Actions): a grouped PR per ecosystem when a dependency has a known vulnerability; routine version-update PRs are off (`open-pull-requests-limit: 0`). Needs Dependabot alerts and security updates enabled in the repo's Settings > Code security |
 | `electron.vite.config.ts` | The renderer's Content Security Policy (stricter in production than in dev) and which dependencies are bundled |
