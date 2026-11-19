@@ -1,0 +1,29 @@
+# Dependabot security updates only: a PR is raised when a dependency has a known vulnerability.
+# `open-pull-requests-limit: 0` turns off routine version-update PRs but leaves security updates on.
+# Security updates also need "Dependabot alerts" and "Dependabot security updates" enabled in the
+# repository's Settings > Code security.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: daily
+    open-pull-requests-limit: 0
+    groups:
+      npm-security:
+        applies-to: security-updates
+        patterns: ['*']
+    commit-message:
+      prefix: 'fix(deps)'
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: daily
+    open-pull-requests-limit: 0
+    groups:
+      actions-security:
+        applies-to: security-updates
+        patterns: ['*']
+    commit-message:
+      prefix: 'ci(deps)'
