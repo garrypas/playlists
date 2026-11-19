@@ -23,8 +23,8 @@ Use Node 24 (`.nvmrc`; run `nvm use` first; `engines` and CI both rely on it).
 - `electron.vite.config.ts` — build config for the processes, and the renderer's CSP
 - `build/` — app icon (`icon.svg` source, `icon.png` for electron-builder and dev)
 - `.github/workflows/ci.yml` — typecheck, test and build on macOS and Windows for pushes to `main` and PRs
-- `.github/workflows/approval.yml` — the required `Approval` status on PRs: a maintainer (the author included, since GitHub won't let authors approve their own PRs) comments `/approve` or adds the `approved` label; new pushes reset it
-- `.github/rulesets/main.json` — the `main` ruleset: changes only through PRs, which merge only when both `Check` jobs and `Approval` pass; no force pushes, deletion or bypass. Apply changes with `node scripts/applyRuleset.mjs` (needs `gh auth login` as a repo admin)
+- `.github/workflows/approval.yml` — the required `Approval` status on PRs: a maintainer (the author included, since GitHub won't let authors approve their own PRs) comments `/approve <sha>` with the full SHA of the PR's latest commit. Approval covers that commit only, so new pushes need approving again
+- `.github/rulesets/main.json` — the `main` ruleset: changes only through PRs that are up to date with `main` and pass both `Check` jobs and `Approval`; no force pushes, deletion or bypass. Apply changes with `node scripts/applyRuleset.mjs` (needs `gh auth login` as a repo admin), which also makes every outside contributor's workflow runs wait for a maintainer
 - `.github/workflows/release.yml` — on a `v*` tag: set the version, run CI, build macOS (x64, arm64; ad-hoc signed, no certificate) and unsigned Windows installers, publish a GitHub release. Each architecture is packaged separately so it bundles its own ffmpeg (`asarUnpack`)
 - `.github/dependabot.yml` — Dependabot raises PRs for vulnerable npm packages and GitHub Actions (security updates only, no routine version bumps)
 - `.claude/` — Claude Code config. Hooks and settings only work in Claude Code; the docs below are plain Markdown for any agent.

@@ -1,42 +1,39 @@
 name: Approval
 
-# Sets the required "Approval" commit status on a PR's latest commit. The `main` ruleset (.github/rulesets/main.json)
-# blocks merging until it passes. GitHub doesn't let authors approve their own PRs, so this check lets any maintainer
-# (anyone with write access, the author included) approve:
-# - comment `/approve` on the PR, or add the `approved` label; and
-# - pushing new commits removes the label, so the new code needs approving again.
+# Records a maintainer's approval as the required "Approval" commit status, which the `main` ruleset
+# (.github/rulesets/main.json) needs before a PR can merge. GitHub doesn't let authors approve their own PRs, so this
+# lets any maintainer (anyone with write access, the author included) approve one specific commit by commenting:
 #
-# pull_request_target runs this file from `main` with a token that can set statuses, even for PRs from forks. That's
-# safe only because nothing here checks out or runs the PR's code. Keep it that way (.claude/agents/security.md).
+#   /approve <sha>     (the PR's latest commit, full 40-character SHA: "Copy full SHA" on the commit)
+#
+# Approval belongs to that commit only: new pushes have no status, so they need approving again. A SHA that isn't the
+# PR's latest commit is refused, so code pushed while a maintainer was reviewing can't be approved by mistake. The
+# full SHA is required because a short prefix can be matched by a crafted commit.
+#
+# Comment-triggered runs use this file from `main` and never check out or run PR code; keep it that way
+# (.claude/agents/security.md). The job is deliberately not named "Approval", so the only thing with that name is the
+# commit status.
 on:
-  pull_request_target:
-    types: [opened, reopened, synchronize, labeled, unlabeled]
   issue_comment:
     types: [created]
-
-concurrency:
-  group: approval-${{ github.event.pull_request.number || github.event.issue.number }}
-  cancel-in-progress: false
 
 permissions: {}
 
 jobs:
   approval:
-    name: Approval
-    if: github.event_name == 'pull_request_target' || (github.event.issue.pull_request && contains(github.event.comment.body, '/approve'))
+    name: Record approval
+    if: github.event.issue.pull_request && startsWith(github.event.comment.body, '/approve')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       statuses: write
       pull-requests: write
-      issues: write
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      EVENT: ${{ github.event_name }}
-      ACTION: ${{ github.event.action }}
-      ACTOR: ${{ github.event.sender.login }}
-      PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+      ACTOR: ${{ github.event.comment.user.login }}
+      PR: ${{ github.event.issue.number }}
+      COMMENT_ID: ${{ github.event.comment.id }}
       # Passed as data, never interpolated into the script.
       COMMENT: ${{ github.event.comment.body }}
     steps:
@@ -44,47 +41,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          label=approved
 
-          # Whether ACTOR may approve: write, maintain or admin on this repo.
-          can_approve() {
-            local permission
-            permission=$(gh api "repos/$GH_REPO/collaborators/$ACTOR/permission" --jq .permission 2>/dev/null || echo none)
-            [[ "$permission" == admin || "$permission" == write || "$permission" == maintain ]]
-          }
+          react() { gh api "repos/$GH_REPO/issues/comments/$COMMENT_ID/reactions" -f content="$1" >/dev/null || true; }
+          refuse() { echo "$1"; react confused; gh pr comment "$PR" --body "$1"; exit 0; }
 
-          # Labels set with this token don't start new runs, so each event works out the status itself.
-          sha=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
-          labels=$(gh pr view "$PR" --json labels --jq '[.labels[].name] | join(",")')
-          has_label=false
-          [[ ",$labels," == *",$label,"* ]] && has_label=true
-
-          if [[ "$EVENT" == issue_comment ]]; then
-            trimmed=$(printf '%s' "$COMMENT" | tr -d '[:space:]')
-            if [[ "$trimmed" != /approve ]]; then
-              echo "Not an approval comment."
-              exit 0
-            fi
-            if ! can_approve; then
-              echo "Only maintainers can approve; ignoring the comment."
-              exit 0
-            fi
-            gh label create "$label" --color 2da44e --description "Approved for merging" 2>/dev/null || true
-            gh pr edit "$PR" --add-label "$label"
-            has_label=true
-          elif [[ "$ACTION" == synchronize && "$has_label" == true ]]; then
-            gh pr edit "$PR" --remove-label "$label"
-            has_label=false
-          elif [[ "$ACTION" == labeled && "$has_label" == true ]] && ! can_approve; then
-            # Triage-only collaborators can add labels but can't approve.
-            gh pr edit "$PR" --remove-label "$label"
-            has_label=false
+          permission=$(gh api "repos/$GH_REPO/collaborators/$ACTOR/permission" --jq .permission 2>/dev/null || echo none)
+          if [[ "$permission" != admin && "$permission" != maintain && "$permission" != write ]]; then
+            echo "Only maintainers can approve; ignoring the comment."
+            exit 0
           fi
 
-          if [[ "$has_label" == true ]]; then
-            state=success; description="Approved"
-          else
-            state=pending; description="Waiting for a maintainer to comment /approve"
+          # The comment must be exactly "/approve <sha>", give or take whitespace.
+          read -r command sha extra <<<"$(printf '%s' "$COMMENT" | tr '\r\n\t' '   ')" || true
+          head=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
+          if [[ "$command" != /approve || -n "${extra:-}" || ! "${sha:-}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            refuse "Approval not recorded. Comment \`/approve <sha>\` with the full SHA of the PR's latest commit: \`/approve $head\`."
           fi
-          gh api "repos/$GH_REPO/statuses/$sha" -f state="$state" -f context=Approval -f description="$description" >/dev/null
-          echo "Approval: $state for $sha"
+          if [[ "$head" != "$(printf '%s' "$sha" | tr 'A-F' 'a-f')" ]]; then
+            refuse "Approval not recorded: \`${sha}\` isn't this PR's latest commit (\`$head\`). Review the latest changes, then comment \`/approve $head\`."
+          fi
+
+          gh api "repos/$GH_REPO/statuses/$head" -f state=success -f context=Approval \
+            -f description="Approved by $ACTOR" >/dev/null
+          react '+1'
+          echo "Approval recorded for $head"
