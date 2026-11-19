@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron'
-import { join } from 'node:path'
-import { MAX_TEMPO_CHANGE, type CreatePlaylistInput } from '../shared/playlist'
+import { stat } from 'node:fs/promises'
+import { isAbsolute, join } from 'node:path'
+import { AUDIO_EXTENSIONS, isAudioFileName, MAX_TEMPO_CHANGE, type CreatePlaylistInput } from '../shared/playlist'
 import { handleAudioRequests, registerAudioScheme } from './audioProtocol'
 import { openPlaylistDatabase, PlaylistDatabase } from './playlistDatabase'
 import { readTagsForFiles } from './trackMetadata'
@@ -15,12 +16,13 @@ function sendPlaylistsToWindows(): void {
   for (const window of BrowserWindow.getAllWindows()) window.webContents.send('playlists:changed', playlists)
 }
 
-// Detects new songs' tempos and keys in the background and sends the window the updated playlists after each one.
+// Finds new songs' tempos and DJ details (one pass over the audio) and keys in the background, once per file, and sends
+// the window the updated playlists after each one.
 const analysisWorkerPath = join(__dirname, 'analysisWorker.js')
-const tempoScanner = createBackgroundScanner(
-  (filePath) => analyseInWorker(analysisWorkerPath, 'tempo', filePath),
-  (filePath, bpm) => {
-    playlistDatabase.saveTempo(filePath, bpm)
+const rhythmScanner = createBackgroundScanner(
+  (filePath) => analyseInWorker(analysisWorkerPath, 'rhythm', filePath),
+  (filePath, rhythm) => {
+    playlistDatabase.saveRhythm(filePath, rhythm)
     sendPlaylistsToWindows()
   },
 )
@@ -33,7 +35,7 @@ const keyScanner = createBackgroundScanner(
 )
 
 function scanForMissingDetails(): void {
-  tempoScanner.scan(playlistDatabase.filesNeedingTempo())
+  rhythmScanner.scan(playlistDatabase.filesNeedingRhythm())
   keyScanner.scan(playlistDatabase.filesNeedingKey())
 }
 
@@ -92,6 +94,28 @@ function requireString(value: unknown, label: string): string {
   return value
 }
 
+// The most files one drop can add, so a runaway call can't make main stat and tag-read without end.
+const MAX_DROPPED_FILES = 5000
+
+// Paths of files dropped on the window. The preload gets them from the dropped File objects (webUtils), which only
+// carry a path when the user dragged a real file in, but main still trusts nothing: anything that isn't an absolute
+// path to an existing regular file with an audio extension is skipped.
+async function requireDroppedAudioPaths(value: unknown): Promise<string[]> {
+  if (!Array.isArray(value) || value.length > MAX_DROPPED_FILES || value.some((item) => typeof item !== 'string')) {
+    throw new Error('Invalid dropped files.')
+  }
+  const candidates = [...new Set(value as string[])].filter((path) => isAbsolute(path) && isAudioFileName(path))
+  const isFile = await Promise.all(
+    candidates.map((path) =>
+      stat(path).then(
+        (stats) => stats.isFile(),
+        () => false,
+      ),
+    ),
+  )
+  return candidates.filter((_path, index) => isFile[index])
+}
+
 function requireCreatePlaylistInput(value: unknown): CreatePlaylistInput {
   if (typeof value !== 'object' || value === null) throw new Error('Invalid playlist details.')
   const { title, description } = value as Record<string, unknown>
@@ -121,6 +145,9 @@ ipcMain.handle('playlists:move-track', (_event, playlistId: unknown, trackId: un
 ipcMain.handle('playlists:set-track-tempo', (_event, trackId: unknown, percent: unknown) =>
   playlistDatabase.setTrackTempo(requireId(trackId, 'track'), requireTempo(percent)),
 )
+ipcMain.handle('playlists:dj-details', (_event, trackId: unknown) =>
+  playlistDatabase.getDjDetails(requireId(trackId, 'track')),
+)
 ipcMain.handle('playlists:move', (_event, id: unknown, toIndex: unknown) =>
   playlistDatabase.movePlaylist(requireId(id, 'playlist'), requireIndex(toIndex, 'playlist')),
 )
@@ -128,11 +155,21 @@ ipcMain.handle('playlists:add-audio-files', async (_event, id: unknown) => {
   const playlistId = requireId(id, 'playlist')
   const result = await dialog.showOpenDialog({
     properties: ['openFile', 'multiSelections'],
-    filters: [{ name: 'Audio', extensions: ['mp3', 'm4a', 'aac', 'wav', 'aiff', 'flac', 'ogg', 'opus'] }],
+    filters: [{ name: 'Audio', extensions: [...AUDIO_EXTENSIONS] }],
   })
   if (result.canceled || result.filePaths.length === 0) return playlistDatabase.list()
   const tags = await readTagsForFiles(result.filePaths)
   const playlists = playlistDatabase.addAudioFiles(playlistId, result.filePaths, tags)
+  scanForMissingDetails()
+  return playlists
+})
+
+ipcMain.handle('playlists:add-dropped-files', async (_event, id: unknown, paths: unknown) => {
+  const playlistId = requireId(id, 'playlist')
+  const filePaths = await requireDroppedAudioPaths(paths)
+  if (filePaths.length === 0) return playlistDatabase.list()
+  const tags = await readTagsForFiles(filePaths)
+  const playlists = playlistDatabase.addAudioFiles(playlistId, filePaths, tags)
   scanForMissingDetails()
   return playlists
 })
@@ -157,8 +194,8 @@ app.whenReady().then(async () => {
     playlistDatabase.saveTags(await readTagsForFiles(playlistDatabase.filesNeedingTags()))
     handleAudioRequests((trackId) => playlistDatabase.getTrackFilePath(trackId))
     createWindow()
-    // Songs whose tempo or key wasn't found last time (added just before quitting, saved by an older version, or
-    // unreadable) are scanned again.
+    // Songs whose tempo, DJ details or key weren't found last time (added just before quitting, saved by an older
+    // version, or unreadable) are scanned again.
     scanForMissingDetails()
 
     app.on('activate', () => {
@@ -175,7 +212,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
-  tempoScanner.stop()
+  rhythmScanner.stop()
   keyScanner.stop()
   playlistDatabase?.close()
 })

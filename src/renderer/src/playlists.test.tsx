@@ -55,7 +55,7 @@ describe('opening the app', () => {
     const { user } = await renderApp(library)
     await openPlaylist(user, 'Empty one')
     expect(
-      screen.getByText('This playlist is empty. Add songs from your music library to get started.'),
+      screen.getByText('This playlist is empty. Add songs, or drag audio files here from your computer.'),
     ).toBeInTheDocument()
   })
 })

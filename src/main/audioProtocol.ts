@@ -20,12 +20,20 @@ const mimeTypes: Record<string, string> = {
   '.opus': 'audio/ogg',
 }
 
-// Must run before the app is ready.
+// Must run before the app is ready. `corsEnabled`, with the header below, lets DJ mode route the window's <audio>
+// elements (crossOrigin="anonymous") through Web Audio for its bass controls; without it Web Audio hears silence.
 export function registerAudioScheme(): void {
   protocol.registerSchemesAsPrivileged([
-    { scheme: AUDIO_SCHEME, privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } },
+    {
+      scheme: AUDIO_SCHEME,
+      privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true },
+    },
   ])
 }
+
+// Only this app's own window can load this scheme (navigation and new windows are denied), and it serves only songs
+// saved in a playlist, so any origin may read them.
+const CORS_HEADERS = { 'Access-Control-Allow-Origin': '*' }
 
 export function handleAudioRequests(getTrackFilePath: (trackId: number) => string | undefined): void {
   protocol.handle(AUDIO_SCHEME, (request) => {
@@ -42,10 +50,11 @@ export function handleAudioRequests(getTrackFilePath: (trackId: number) => strin
       if (!filePath) throw new Error('Unknown track.')
       size = statSync(filePath).size
     } catch {
-      return new Response(null, { status: 404 })
+      return new Response(null, { status: 404, headers: CORS_HEADERS })
     }
 
     const headers = {
+      ...CORS_HEADERS,
       'Content-Type': mimeTypes[extname(filePath).toLowerCase()] ?? 'application/octet-stream',
       'Accept-Ranges': 'bytes',
     }
@@ -63,7 +72,7 @@ export function handleAudioRequests(getTrackFilePath: (trackId: number) => strin
     const start = range[1] === '' ? Math.max(0, size - Number(range[2])) : Number(range[1])
     const end = range[1] === '' || range[2] === '' ? size - 1 : Math.min(Number(range[2]), size - 1)
     if (start > end || start >= size) {
-      return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } })
+      return new Response(null, { status: 416, headers: { ...CORS_HEADERS, 'Content-Range': `bytes */${size}` } })
     }
     return new Response(streamFile(filePath, start, end), {
       status: 206,

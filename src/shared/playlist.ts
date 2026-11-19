@@ -1,3 +1,5 @@
+import type { DjDetails } from './djDetails'
+
 export interface PlaylistTrack {
   id: number
   filePath: string
@@ -27,6 +29,15 @@ export interface PlaylistTrack {
 /** The tempo control speeds a song up or slows it down by up to this many percent. */
 export const MAX_TEMPO_CHANGE = 10
 
+/** The audio file types songs can be added from (lower case, without the dot), by file picker or drag and drop. */
+export const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'aac', 'wav', 'aiff', 'flac', 'ogg', 'opus'] as const
+
+/** Whether a file name ends in one of `AUDIO_EXTENSIONS` (any case). */
+export function isAudioFileName(name: string): boolean {
+  const extension = /\.([^./\\]+)$/.exec(name)?.[1]?.toLowerCase()
+  return (AUDIO_EXTENSIONS as readonly string[]).includes(extension ?? '')
+}
+
 export interface Playlist {
   id: number
   title: string
@@ -47,11 +58,22 @@ export interface PlaylistApi {
   rename(id: number, title: string): Promise<Playlist[]>
   remove(id: number): Promise<Playlist[]>
   addAudioFiles(id: number): Promise<Playlist[]>
+  /**
+   * Adds audio files the user dragged in from Finder or Explorer to the end of a playlist, like `addAudioFiles`.
+   * Takes the dropped `File` objects themselves (the preload finds their paths), so the window never handles a path.
+   * Files that aren't supported audio, no longer exist, or are already in the playlist are skipped.
+   */
+  addDroppedFiles(id: number, files: File[]): Promise<Playlist[]>
   addTrack(playlistId: number, trackId: number): Promise<Playlist[]>
   removeTrack(playlistId: number, trackId: number): Promise<Playlist[]>
   moveTrack(playlistId: number, trackId: number, toIndex: number): Promise<Playlist[]>
   /** Saves how much faster or slower (in percent) a song plays in its playlist. */
   setTrackTempo(trackId: number, percent: number): Promise<Playlist[]>
+  /**
+   * What's known about a song's audio for mixing it (beat grid, phrases, sections, drops), or null until its
+   * background analysis has run. Shared by every copy of the file.
+   */
+  djDetails(trackId: number): Promise<DjDetails | null>
   /** Moves a playlist to `toIndex` in the list of playlists. */
   move(id: number, toIndex: number): Promise<Playlist[]>
   /**

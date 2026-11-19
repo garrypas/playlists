@@ -3,6 +3,7 @@ import {
   AudioLines,
   Disc3,
   GripVertical,
+  Headphones,
   Heart,
   Home,
   Library,
@@ -22,7 +23,23 @@ import {
   VolumeX,
   X,
 } from 'lucide-react'
-import { MAX_TEMPO_CHANGE as MAX_TEMPO, type Playlist, type PlaylistTrack } from '../../shared/playlist'
+import type { DjDetails } from '../../shared/djDetails'
+import {
+  isAudioFileName,
+  MAX_TEMPO_CHANGE as MAX_TEMPO,
+  type Playlist,
+  type PlaylistTrack,
+} from '../../shared/playlist'
+import { createDeckEq, type DeckEq } from './dj/deckEq'
+import {
+  incomingTimeAt,
+  levelsAt,
+  nudgedRate,
+  outgoingTimeAt,
+  planTransition,
+  transitionName,
+  type TransitionPlan,
+} from './dj/djMix'
 import { ExploreView } from './ExploreView'
 import { LibraryView, type LibrarySource } from './LibraryView'
 import { NameDialog } from './NameDialog'
@@ -69,7 +86,36 @@ function shuffledIds(tracks: PlaylistTrack[], firstId?: number): number[] {
   return firstId === undefined ? ids : [firstId, ...ids]
 }
 
+/** A DJ-mode transition from the playing song into the next. */
+interface Mix {
+  plan: TransitionPlan
+  outgoingId: number
+  incomingId: number
+  /** The details it was planned with; if better ones arrive before it starts, it's planned again. */
+  outDetails: DjDetails | null
+  inDetails: DjDetails | null
+  /** planned: waiting for its start; running: both decks playing; swapped: the incoming song is now the current one. */
+  phase: 'planned' | 'running' | 'swapped'
+}
+
+/** The moving parts of a mix that don't affect what's shown. */
+interface MixRunner {
+  /** Whether the incoming song is loaded on the other deck. */
+  loaded: boolean
+  startTimer: ReturnType<typeof setTimeout> | null
+  /** Smoothed phase error of the following deck, in seconds (positive: ahead). */
+  error: number
+}
+
+// How long before a mix the incoming song is loaded (outgoing file seconds), and how long its deck runs silently
+// before it comes in, so it's in phase by then.
+const DJ_PRELOAD_SECONDS = 20
+const DJ_PREROLL_SECONDS = 2
+// How often a running mix updates levels and phase (ms).
+const DJ_TICK_MS = 50
+
 const VOLUME_KEY = 'volume'
+const DJ_MODE_KEY = 'djMode'
 
 // How long the tempo control waits for the user to stop adjusting before saving, so a drag isn't saved at every step.
 const TEMPO_SAVE_DELAY_MS = 300
@@ -87,6 +133,15 @@ function withTempos(playlists: Playlist[], tempos: ReadonlyMap<number, number>):
     ...playlist,
     tracks: playlist.tracks.map((track) => (tempos.has(track.id) ? { ...track, tempo: tempos.get(track.id)! } : track)),
   }))
+}
+
+// Whether DJ mode was on last time; off if it was never set or can't be read.
+function savedDjMode(): boolean {
+  try {
+    return localStorage.getItem(DJ_MODE_KEY) === 'on'
+  } catch {
+    return false
+  }
 }
 
 // The volume from last time (0–1), or full volume if it was never set or can't be read.
@@ -115,7 +170,25 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [position, setPosition] = useState(0)
   const [duration, setDuration] = useState<number | null>(null)
-  const audioRef = useRef<HTMLAudioElement>(null)
+  // Two decks, so DJ mode can play one song into the next. The live deck plays the current song; the other is idle,
+  // or carries the incoming (then outgoing) song during a mix. Without DJ mode, only deck 0 plays.
+  const deckA = useRef<HTMLAudioElement>(null)
+  const deckB = useRef<HTMLAudioElement>(null)
+  const [liveDeck, setLiveDeck] = useState<0 | 1>(0)
+  const liveDeckRef = useRef<0 | 1>(0)
+  // The track id loaded on each deck, so swapping decks doesn't reload the song that's already playing.
+  const deckTrackIds = useRef<(number | null)[]>([null, null])
+  const deckEq = useRef<DeckEq | null | undefined>(undefined)
+  const [djMode, setDjMode] = useState(savedDjMode)
+  // The speed DJ mode plays the current song at (percent, unrounded so beats stay matched); not saved.
+  const [djTempo, setDjTempo] = useState<{ trackId: number; percent: number } | null>(null)
+  // What's known about each file for mixing, by file path: undefined while loading, null if nothing is known yet.
+  const [djDetails, setDjDetails] = useState<ReadonlyMap<string, DjDetails | null>>(new Map())
+  const djDetailsRequested = useRef(new Set<string>())
+  // The planned or running transition into the next song.
+  const [mix, setMixState] = useState<Mix | null>(null)
+  const mixRef = useRef<Mix | null>(null)
+  const mixRunner = useRef<MixRunner>({ loaded: false, startTimer: null, error: 0 })
   const progressTrackRef = useRef<HTMLDivElement>(null)
   const [volume, setVolume] = useState(savedVolume)
   const [muted, setMuted] = useState(false)
@@ -138,6 +211,11 @@ function App() {
   // The same, for dragging playlists in the sidebar.
   const [draggedPlaylistId, setDraggedPlaylistId] = useState<number | null>(null)
   const [playlistDropSlot, setPlaylistDropSlot] = useState<number | null>(null)
+  // Where audio files dragged in from Finder or Explorer would drop: the open playlist's song list, or a playlist in
+  // the sidebar (by ID). Then what the last drop added, shown under the sidebar's playlists for a few seconds.
+  const [fileDropTarget, setFileDropTarget] = useState<'list' | number | null>(null)
+  const [fileDropStatus, setFileDropStatus] = useState('')
+  const fileDropStatusTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const queueButtonRef = useRef<HTMLButtonElement>(null)
   const [view, setView] = useState<'home' | 'explore' | 'library'>('home')
   const [source, setSource] = useState<PlaySource>('playlist')
@@ -173,7 +251,9 @@ function App() {
   const audibleLevel = muted ? 0 : Math.round(volume * 100)
   const audible = audibleLevel > 0
   // How much faster (positive) or slower (negative) than normal the playing song plays, in percent.
-  const tempo = currentTrack?.tempo ?? 0
+  // In DJ mode, the DJ's speed for the song once it has mixed one in; until then, the song's own tempo.
+  const tempo =
+    djMode && djTempo && djTempo.trackId === currentTrack?.id ? djTempo.percent : (currentTrack?.tempo ?? 0)
   // The playing song's BPM, and its BPM at the current speed (e.g. "120.0 (123.0) BPM"), if it's known.
   const currentBpm = currentTrack?.bpm == null ? null : formatPlayerBpm(currentTrack.bpm, tempo)
   // The playing song's key, and the key the tempo moves it to (e.g. "Ebm (Em)"), if it's known.
@@ -200,22 +280,32 @@ function App() {
     }
   }, [queueOpen])
 
+  function liveAudio(): HTMLAudioElement | null {
+    return (liveDeckRef.current === 0 ? deckA : deckB).current
+  }
+
+  function otherAudio(): HTMLAudioElement | null {
+    return (liveDeckRef.current === 0 ? deckB : deckA).current
+  }
+
+  // During a mix, the levels come from the mix; otherwise the live deck plays at the volume.
   useEffect(() => {
-    const audio = audioRef.current
+    for (const deck of [deckA.current, deckB.current]) if (deck) deck.muted = muted
+    const audio = liveAudio()
     if (!audio) return
     audio.volume = volume
-    audio.muted = muted
+    if (mixRef.current) djTickRef.current()
   }, [volume, muted])
 
   // Loading a new song resets the speed to the default, so both are set to the playing song's tempo.
   // Pitch moves with the speed, like a turntable: Chromium's pitch-keeping time-stretch makes music stutter.
   useEffect(() => {
-    const audio = audioRef.current
+    const audio = liveAudio()
     if (!audio) return
     audio.preservesPitch = false
     audio.defaultPlaybackRate = 1 + tempo / 100
     audio.playbackRate = 1 + tempo / 100
-  }, [tempo, currentTrack?.id])
+  }, [tempo, currentTrack?.id, liveDeck])
 
   useEffect(() => {
     try {
@@ -225,23 +315,44 @@ function App() {
     }
   }, [volume])
 
+  // DJ mode is remembered between launches. While it's on, both decks play through their level and bass controls
+  // (routed once, the first time; it can't be undone).
   useEffect(() => {
-    const audio = audioRef.current
+    try {
+      localStorage.setItem(DJ_MODE_KEY, djMode ? 'on' : 'off')
+    } catch {
+      // Not remembering DJ mode is fine.
+    }
+    if (djMode && deckEq.current === undefined && deckA.current && deckB.current) {
+      deckEq.current = createDeckEq([deckA.current, deckB.current])
+    }
+  }, [djMode])
+
+  useEffect(() => {
+    const audio = liveAudio()
     if (!audio) return
+    // A mix swapped decks: the song is already playing on the new live deck.
+    if (currentTrack && deckTrackIds.current[liveDeckRef.current] === currentTrack.id) {
+      setPosition(audio.currentTime)
+      setDuration(Number.isFinite(audio.duration) ? audio.duration : null)
+      return
+    }
     setPosition(0)
     setDuration(null)
+    deckTrackIds.current[liveDeckRef.current] = currentTrack?.id ?? null
     if (currentTrack) {
       audio.src = `playlist-audio://track/${currentTrack.id}`
     } else {
       audio.removeAttribute('src')
       audio.load()
     }
-  }, [currentTrack?.id])
+  }, [currentTrack?.id, liveDeck])
 
   useEffect(() => {
-    const audio = audioRef.current
+    const audio = liveAudio()
     if (!audio || !currentTrack) return
     if (playing) {
+      deckEq.current?.resume()
       // AbortError just means the source changed mid-load; the next play() call takes over.
       audio.play().catch((error: unknown) => {
         if (!(error instanceof DOMException && error.name === 'AbortError')) setPlaying(false)
@@ -280,27 +391,271 @@ function App() {
 
   // Switching to the track that's already loaded doesn't reload the audio, so restart it instead.
   function playTrackAt(index: number): void {
-    const audio = audioRef.current
+    const audio = liveAudio()
     if (index !== activeTrack || !audio) return setActiveTrack(index)
     audio.currentTime = 0
     if (playing) void audio.play().catch(() => setPlaying(false))
   }
 
-  // Moves to the next queued song, or else the next song in the playlist. Returns false if there's nothing left.
-  function advance(wrap: boolean): boolean {
-    const tracks = playingTracks
-    const queuedIndex = queue.length ? tracks.findIndex((track) => track.id === queue[0]) : -1
-    if (queuedIndex >= 0) {
+  // The song that plays next: the next queued song, or else the next in the playlist (or null past the end).
+  function nextUp(wrap: boolean): { index: number; fromQueue: boolean } | null {
+    const queuedIndex = queue.length ? playingTracks.findIndex((track) => track.id === queue[0]) : -1
+    if (queuedIndex >= 0) return { index: queuedIndex, fromQueue: true }
+    const next = trackIndexAfter(1, wrap)
+    return next === null ? null : { index: next, fromQueue: false }
+  }
+
+  // Takes a queued song off the queue (remembering where the playlist was), or leaves the queue for the playlist.
+  function leaveFor(step: { fromQueue: boolean }): void {
+    if (step.fromQueue) {
       setQueue(queue.slice(1))
       if (resumeFrom === null) setResumeFrom(activeTrack)
-      playTrackAt(queuedIndex)
-      return true
+    } else {
+      setResumeFrom(null)
     }
-    const next = trackIndexAfter(1, wrap)
-    if (next === null) return false
-    setResumeFrom(null)
-    playTrackAt(next)
+  }
+
+  // Moves to the next queued song, or else the next song in the playlist. Returns false if there's nothing left.
+  function advance(wrap: boolean): boolean {
+    const step = nextUp(wrap)
+    if (!step) return false
+    leaveFor(step)
+    playTrackAt(step.index)
     return true
+  }
+
+  // The song DJ mode mixes into next (it never wraps round to the start).
+  const djNext = djMode ? nextUp(false) : null
+  const djNextTrack = djNext ? playingTracks[djNext.index] : undefined
+
+  function setMix(next: Mix | null): void {
+    mixRef.current = next
+    setMixState(next)
+  }
+
+  // A deck's level in a mix (0–1, times the volume): on its gain, which glides between updates, or, without Web Audio,
+  // on the element.
+  function setDeckLevel(deck: HTMLAudioElement, level: number): void {
+    if (deckEq.current) {
+      deckEq.current.setLevel(deck, level)
+      deck.volume = volume
+    } else {
+      deck.volume = Math.min(1, Math.max(0, level)) * volume
+    }
+  }
+
+  // Stops a mix straight away: before the swap the incoming song stops; after it, the outgoing one does.
+  function endMix(): void {
+    const current = mixRef.current
+    if (!current) return
+    const runner = mixRunner.current
+    if (runner.startTimer) clearTimeout(runner.startTimer)
+    mixRunner.current = { loaded: false, startTimer: null, error: 0 }
+    const live = liveAudio()
+    const other = otherAudio()
+    other?.pause()
+    for (const deck of [live, other]) {
+      if (!deck) continue
+      setDeckLevel(deck, 1)
+      deckEq.current?.setBass(deck, 1)
+      deckEq.current?.setFilters(deck, 0, 0)
+    }
+    setMix(null)
+  }
+
+  // Loads the incoming song on the other deck, silent and at the matched speed, where it will start.
+  function loadIncoming(current: Mix): void {
+    const other = otherAudio()
+    const otherDeck = liveDeckRef.current === 0 ? 1 : 0
+    if (!other) return
+    const { plan } = current
+    setDeckLevel(other, 0)
+    const atStart = levelsAt(plan, plan.startAt)
+    deckEq.current?.setBass(other, atStart.inLows)
+    deckEq.current?.setFilters(other, 0, atStart.inLowPass)
+    if (deckTrackIds.current[otherDeck] !== current.incomingId) {
+      other.src = `playlist-audio://track/${current.incomingId}`
+      deckTrackIds.current[otherDeck] = current.incomingId
+    }
+    other.preservesPitch = false
+    other.defaultPlaybackRate = plan.incomingRate
+    other.playbackRate = plan.incomingRate
+    other.currentTime = incomingTimeAt(plan, rollStart(plan))
+    mixRunner.current.loaded = true
+  }
+
+  // When the incoming deck starts, silently, before it comes in (outgoing file time).
+  function rollStart(plan: TransitionPlan): number {
+    return plan.startAt - Math.min(DJ_PREROLL_SECONDS, plan.incomingFrom / plan.ratio)
+  }
+
+  // Starts the incoming deck, placing it where it should be if this is late.
+  function startIncoming(): void {
+    mixRunner.current.startTimer = null
+    const current = mixRef.current
+    const live = liveAudio()
+    const other = otherAudio()
+    if (!current || current.phase !== 'planned' || !live || !other) return
+    const target = incomingTimeAt(current.plan, Math.max(live.currentTime, rollStart(current.plan)))
+    if (Math.abs(other.currentTime - target) > 0.02) other.currentTime = target
+    other.play().catch((error: unknown) => {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) endMix()
+    })
+    setMix({ ...current, phase: 'running' })
+    djTickRef.current()
+  }
+
+  // The incoming song becomes the current one: the decks swap, and the queue or playlist moves on to it.
+  function swapDecks(): void {
+    const current = mixRef.current
+    const step = nextUp(false)
+    if (!current || !step || playingTracks[step.index]?.id !== current.incomingId) return endMix()
+    const live = liveDeckRef.current === 0 ? 1 : 0
+    liveDeckRef.current = live
+    setLiveDeck(live)
+    setDjTempo({ trackId: current.incomingId, percent: (current.plan.incomingRate - 1) * 100 })
+    leaveFor(step)
+    setActiveTrack(step.index)
+    setMix({ ...current, phase: 'swapped' })
+  }
+
+  // Runs a mix: loads and starts the incoming song on time, sets both decks' levels and bass, keeps the beats in phase
+  // by nudging the following deck's speed, swaps decks, and stops the outgoing song at the end.
+  function djTick(): void {
+    const current = mixRef.current
+    const live = liveAudio()
+    const other = otherAudio()
+    if (!current || !playing || !live || !other) return
+    const { plan, phase } = current
+    const swapped = phase === 'swapped'
+    // The outgoing song's file time, read from the live deck, which leads.
+    const time = swapped ? outgoingTimeAt(plan, live.currentTime) : live.currentTime
+    const runner = mixRunner.current
+
+    if (phase === 'planned') {
+      // Missed (a cut ends where it starts, so it gets half a second's grace).
+      if (time >= Math.max(plan.endAt, plan.startAt + 0.5)) return endMix()
+      if (!runner.loaded && time >= plan.startAt - DJ_PRELOAD_SECONDS) loadIncoming(current)
+      const rollAt = rollStart(plan)
+      if (runner.loaded && !runner.startTimer && time >= rollAt - 0.25) {
+        const outgoingRate = plan.incomingRate / plan.ratio
+        runner.startTimer = setTimeout(startIncoming, Math.max(0, ((rollAt - time) / outgoingRate) * 1000))
+      }
+      // A filter fade into a beat sweeps the outgoing song away before the incoming one starts.
+      if (time >= plan.sweepFrom) {
+        const levels = levelsAt(plan, time)
+        setDeckLevel(live, levels.outLevel)
+        deckEq.current?.setBass(live, levels.outLows)
+        deckEq.current?.setFilters(live, levels.outHighPass, 0)
+      }
+      return
+    }
+
+    const outgoing = swapped ? other : live
+    const incoming = swapped ? live : other
+    const levels = levelsAt(plan, time)
+    setDeckLevel(outgoing, levels.outLevel)
+    setDeckLevel(incoming, levels.inLevel)
+    deckEq.current?.setBass(outgoing, levels.outLows)
+    deckEq.current?.setBass(incoming, levels.inLows)
+    deckEq.current?.setFilters(outgoing, levels.outHighPass, 0)
+    deckEq.current?.setFilters(incoming, 0, levels.inLowPass)
+
+    // The deck that isn't live follows the live one's beat.
+    if (plan.beatmatched && !other.paused) {
+      const baseRate = swapped ? plan.incomingRate / plan.ratio : plan.incomingRate
+      const expected = swapped ? outgoingTimeAt(plan, live.currentTime) : incomingTimeAt(plan, live.currentTime)
+      runner.error = runner.error * 0.7 + ((other.currentTime - expected) / baseRate) * 0.3
+      const rate = nudgedRate(baseRate, runner.error, (swapped ? levels.outLevel : levels.inLevel) < 0.05)
+      if (Math.abs(other.playbackRate - rate) > 0.0005) other.playbackRate = rate
+    }
+
+    if (phase === 'running' && time >= plan.swapAt) swapDecks()
+    else if (swapped && time >= plan.endAt) endMix()
+  }
+  const djTickRef = useRef(djTick)
+  djTickRef.current = djTick
+
+  // A running mix updates many times a second, not just when the browser reports the time.
+  useEffect(() => {
+    if (!djMode || !playing || !mix) return
+    const timer = setInterval(() => djTickRef.current(), DJ_TICK_MS)
+    return () => clearInterval(timer)
+  }, [djMode, playing, mix !== null])
+
+  useEffect(() => () => {
+    if (mixRunner.current.startTimer) clearTimeout(mixRunner.current.startTimer)
+  }, [])
+
+  // Fetches what's known for mixing the playing and next songs.
+  useEffect(() => {
+    if (!djMode) return
+    for (const track of [currentTrack, djNextTrack]) {
+      if (!track || djDetails.has(track.filePath) || djDetailsRequested.current.has(track.filePath)) continue
+      const { filePath } = track
+      djDetailsRequested.current.add(filePath)
+      void window.desktop.playlists
+        .djDetails(track.id)
+        .catch(() => null)
+        .then((details) => {
+          djDetailsRequested.current.delete(filePath)
+          setDjDetails((known) => new Map(known).set(filePath, details))
+        })
+    }
+  }, [djMode, currentTrack?.filePath, djNextTrack?.filePath, djDetails])
+
+  // Songs with nothing known yet are asked about again after background analysis changes something.
+  useEffect(() => {
+    setDjDetails((known) =>
+      [...known.values()].includes(null) ? new Map([...known].filter(([, details]) => details !== null)) : known,
+    )
+  }, [savedPlaylists])
+
+  // Plans the mix into the next song once both songs' details are in, and drops a plan (or stops a mix) that no
+  // longer fits: DJ mode off, paused, another song chosen, the next song changed, or better details arrived.
+  useEffect(() => {
+    const current = mixRef.current
+    if (current) {
+      const outgoingDetails = currentTrack && djDetails.get(currentTrack.filePath)
+      const incomingDetails = djNextTrack && djDetails.get(djNextTrack.filePath)
+      const stale =
+        !djMode ||
+        !playing ||
+        (current.phase === 'swapped'
+          ? currentTrack?.id !== current.incomingId
+          : currentTrack?.id !== current.outgoingId ||
+            djNextTrack?.id !== current.incomingId ||
+            (current.phase === 'planned' &&
+              (outgoingDetails !== current.outDetails || incomingDetails !== current.inDetails)))
+      if (stale) endMix()
+      return
+    }
+    const live = liveAudio()
+    if (!djMode || !playing || !currentTrack || !djNextTrack || !live) return
+    const outDetails = djDetails.get(currentTrack.filePath)
+    const inDetails = djDetails.get(djNextTrack.filePath)
+    const length = duration ?? currentTrack.durationSeconds
+    if (outDetails === undefined || inDetails === undefined || !length) return
+    const plan = planTransition(
+      { bpm: currentTrack.bpm, key: currentTrack.key, rate: 1 + tempo / 100, duration: length, details: outDetails },
+      {
+        bpm: djNextTrack.bpm,
+        key: djNextTrack.key,
+        rate: 1 + djNextTrack.tempo / 100,
+        duration: djNextTrack.durationSeconds ?? inDetails?.analysedSeconds ?? Number.POSITIVE_INFINITY,
+        details: inDetails,
+      },
+      live.currentTime,
+    )
+    if (plan) {
+      setMix({ plan, outgoingId: currentTrack.id, incomingId: djNextTrack.id, outDetails, inDetails, phase: 'planned' })
+    }
+  })
+
+  // Turning DJ mode on hands the tempo to the DJ. Turning it off gives each song its own tempo back.
+  function toggleDjMode(): void {
+    if (djMode) setDjTempo(null)
+    setDjMode(!djMode)
   }
 
   function playNext(): void {
@@ -308,7 +663,7 @@ function App() {
   }
 
   function playPrevious(): void {
-    const audio = audioRef.current
+    const audio = liveAudio()
     if (audio && audio.currentTime > 3) {
       audio.currentTime = 0
     } else if (resumeFrom !== null) {
@@ -358,7 +713,8 @@ function App() {
       setActiveTrack(index)
       setPlaying(true)
       // The same copy of the song is already loaded, so it won't reload; restart it instead.
-      if (track.id === currentTrack?.id && audioRef.current) audioRef.current.currentTime = 0
+      const audio = liveAudio()
+      if (track.id === currentTrack?.id && audio) audio.currentTime = 0
     }
     if (shuffleOrder) setShuffleOrder(shuffledIds(tracks, track.id))
   }
@@ -423,8 +779,10 @@ function App() {
   }
 
   function seekTo(seconds: number): void {
-    const audio = audioRef.current
+    const audio = liveAudio()
     if (!audio || !duration) return
+    // A mix is timed from where the song was; it's planned again from the new place.
+    endMix()
     audio.currentTime = Math.min(duration, Math.max(0, seconds))
     setPosition(audio.currentTime)
   }
@@ -472,7 +830,8 @@ function App() {
 
   // Changes the playing song's tempo straight away, and saves it once the user stops adjusting it.
   function changeTempo(percent: number): void {
-    if (!currentTrack) return
+    // In DJ mode the DJ sets the tempo.
+    if (!currentTrack || djMode) return
     const trackId = currentTrack.id
     const value = Math.round(Math.min(MAX_TEMPO, Math.max(-MAX_TEMPO, percent)) * 10) / 10 || 0
     setUnsavedTempos((pending) => new Map(pending).set(trackId, value))
@@ -535,6 +894,9 @@ function App() {
   }
 
   function handleTrackEnded(): void {
+    // The song ended before the mix's swap point (its length was off): the incoming song takes over now.
+    if (mixRef.current?.phase === 'running') return swapDecks()
+    endMix()
     if (!advance(false)) setPlaying(false)
   }
 
@@ -586,6 +948,59 @@ function App() {
     } catch (error) {
       window.alert(error instanceof Error ? error.message : 'Could not add audio files.')
     }
+  }
+
+  function showFileDropStatus(message: string): void {
+    setFileDropStatus(message)
+    clearTimeout(fileDropStatusTimer.current)
+    fileDropStatusTimer.current = setTimeout(() => setFileDropStatus(''), 6000)
+  }
+
+  useEffect(() => () => clearTimeout(fileDropStatusTimer.current), [])
+
+  // Adds audio files dropped from Finder or Explorer to the end of `playlist`; anything else in the drop is skipped.
+  async function addDroppedFiles(playlist: Playlist, files: File[]): Promise<void> {
+    const audioFiles = files.filter((file) => isAudioFileName(file.name))
+    const skipped = files.length - audioFiles.length
+    if (audioFiles.length === 0) {
+      showFileDropStatus('Only audio files can be added: MP3, M4A, AAC, WAV, AIFF, FLAC, OGG or Opus.')
+      return
+    }
+    try {
+      const updated = await window.desktop.playlists.addDroppedFiles(playlist.id, audioFiles)
+      const added = (updated.find((item) => item.id === playlist.id)?.tracks.length ?? 0) - playlist.tracks.length
+      applyPlaylists(updated)
+      const skippedNote = skipped === 0 ? '' : ` Skipped ${skipped} ${skipped === 1 ? 'file that isn’t' : 'files that aren’t'} audio.`
+      showFileDropStatus(
+        (added > 0
+          ? `Added ${added} ${added === 1 ? 'song' : 'songs'} to ${playlist.title}.`
+          : `${audioFiles.length === 1 ? 'That song is' : 'Those songs are'} already in ${playlist.title}.`) + skippedNote,
+      )
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Could not add audio files.')
+    }
+  }
+
+  // Files from outside the app (not a song or playlist being moved within it).
+  function draggingFiles(event: React.DragEvent): boolean {
+    return event.dataTransfer?.types.includes('Files') ?? false
+  }
+
+  function allowFileDrop(event: React.DragEvent, target: 'list' | number): void {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+    setFileDropTarget(target)
+  }
+
+  function leaveFileDrop(event: React.DragEvent, target: 'list' | number): void {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+    setFileDropTarget((current) => (current === target ? null : current))
+  }
+
+  function dropFiles(event: React.DragEvent, playlist: Playlist): void {
+    event.preventDefault()
+    setFileDropTarget(null)
+    void addDroppedFiles(playlist, [...event.dataTransfer.files])
   }
 
   async function removeTrack(trackId: number): Promise<void> {
@@ -714,6 +1129,19 @@ function App() {
     setQuery('')
   }
 
+  // What DJ mode will do next, e.g. "16-bar blend into Two at 5:12", or what it's doing now.
+  const djStatus = (() => {
+    const titleOf = (id: number): string => playingTracks.find((track) => track.id === id)?.title ?? 'the next song'
+    if (mix?.phase === 'planned') {
+      return `DJ: ${transitionName(mix.plan)} into ${titleOf(mix.incomingId)} at ${formatDuration(Math.floor(mix.plan.sweepFrom))}`
+    }
+    if (mix?.phase === 'running') return `DJ: mixing into ${titleOf(mix.incomingId)} (${transitionName(mix.plan).toLowerCase()})`
+    if (mix?.phase === 'swapped') return `DJ: mixing out of ${titleOf(mix.outgoingId)}`
+    if (!currentTrack) return 'DJ: choose a song to start the mix'
+    if (!djNextTrack) return 'DJ: nothing to mix into after this song'
+    return `DJ: next up, ${djNextTrack.title}`
+  })()
+
   const upNext = (() => {
     const order = playOrder()
     return order.slice(order.indexOf(resumeFrom ?? activeTrack) + 1)
@@ -814,7 +1242,7 @@ function App() {
               <li key={playlist.id}>
                 <button
                   onClick={() => selectPlaylist(playlist)}
-                  className={`playlist-nav ${view === 'home' && selectedPlaylist?.id === playlist.id ? 'chosen' : ''} ${draggedPlaylistId === playlist.id ? 'playlist-dragging' : ''} ${draggedPlaylistId === null ? '' : dropLine(playlistDropSlot, playlists.findIndex((item) => item.id === draggedPlaylistId), index, playlists.length)}`}
+                  className={`playlist-nav ${view === 'home' && selectedPlaylist?.id === playlist.id ? 'chosen' : ''} ${draggedPlaylistId === playlist.id ? 'playlist-dragging' : ''} ${fileDropTarget === playlist.id ? 'file-drop-target' : ''} ${draggedPlaylistId === null ? '' : dropLine(playlistDropSlot, playlists.findIndex((item) => item.id === draggedPlaylistId), index, playlists.length)}`}
                   title={playlists.length > 1 ? 'Drag, or press Alt+↑/↓, to reorder' : undefined}
                   aria-keyshortcuts={playlists.length > 1 ? 'Alt+ArrowUp Alt+ArrowDown' : undefined}
                   draggable={playlists.length > 1}
@@ -827,11 +1255,14 @@ function App() {
                     }
                   }}
                   onDragOver={(event) => {
+                    if (draggingFiles(event)) return allowFileDrop(event, playlist.id)
                     if (draggedPlaylistId === null) return
                     event.preventDefault()
                     setPlaylistDropSlot(dropSlotAt(event, index))
                   }}
+                  onDragLeave={(event) => leaveFileDrop(event, playlist.id)}
                   onDrop={(event) => {
+                    if (draggingFiles(event)) return dropFiles(event, playlist)
                     if (draggedPlaylistId === null) return
                     event.preventDefault()
                     dropDraggedPlaylist(dropSlotAt(event, index))
@@ -848,6 +1279,9 @@ function App() {
           </ul>
 
           {!loading && playlists.length === 0 && <p className="sidebar-empty">Create a playlist to get started.</p>}
+          <p className="file-drop-status" role="status">
+            {fileDropStatus}
+          </p>
         </div>
       </aside>
 
@@ -944,11 +1378,26 @@ function App() {
               </div>
             </section>
 
-            <section className="tracks-section">
+            <section
+              className={`tracks-section ${fileDropTarget === 'list' ? 'file-drop-target' : ''}`}
+              aria-labelledby="playlist-songs-heading"
+              onDragOver={(event) => {
+                if (selectedPlaylist && draggingFiles(event)) allowFileDrop(event, 'list')
+              }}
+              onDragLeave={(event) => leaveFileDrop(event, 'list')}
+              onDrop={(event) => {
+                if (selectedPlaylist && draggingFiles(event)) dropFiles(event, selectedPlaylist)
+              }}
+            >
+              {fileDropTarget === 'list' && selectedPlaylist && (
+                <p className="file-drop-hint" aria-hidden="true">
+                  <Plus size={18} /> Drop to add to {selectedPlaylist.title}
+                </p>
+              )}
               <div className="section-title-row track-heading">
                 <div>
                   <p className="eyebrow">SAVED ON THIS DEVICE</p>
-                  <h2>{selectedPlaylist ? selectedPlaylist.title : 'Choose a playlist'}</h2>
+                  <h2 id="playlist-songs-heading">{selectedPlaylist ? selectedPlaylist.title : 'Choose a playlist'}</h2>
                 </div>
                 <div className="playlist-actions">
                   <label className="search-field">
@@ -962,7 +1411,7 @@ function App() {
                   </label>
                   <button
                     className="small-action"
-                    title="Add audio files from this computer to the playlist"
+                    title="Add audio files from this computer to the playlist (or drag them onto it)"
                     onClick={() => void addAudioFiles()}
                     disabled={!selectedPlaylist}
                   >
@@ -1102,7 +1551,7 @@ function App() {
                     {query
                       ? `No songs match “${query}”.`
                       : selectedPlaylist
-                        ? 'This playlist is empty. Add songs from your music library to get started.'
+                        ? 'This playlist is empty. Add songs, or drag audio files here from your computer.'
                         : 'Create a playlist to get started.'}
                   </p>
                 )}
@@ -1146,6 +1595,15 @@ function App() {
         </div>
         <div className="player-controls">
           <div className="control-buttons">
+            <button
+              className={`icon-button control-muted ${djMode ? 'control-active' : ''}`}
+              aria-label="DJ mode"
+              title={djMode ? 'Turn DJ mode off' : 'Turn DJ mode on: mix each song into the next, beatmatched'}
+              aria-pressed={djMode}
+              onClick={toggleDjMode}
+            >
+              <Headphones size={16} />
+            </button>
             <button
               className={`icon-button control-muted ${shuffleOrder ? 'control-active' : ''}`}
               aria-label="Shuffle"
@@ -1230,6 +1688,11 @@ function App() {
               {formatDuration(duration === null ? (currentTrack?.durationSeconds ?? null) : Math.floor(duration))}
             </span>
           </div>
+          {djMode && (
+            <p className="dj-status" role="status">
+              {djStatus}
+            </p>
+          )}
         </div>
         <div className="player-side">
           <div className="player-tempo">
@@ -1242,7 +1705,7 @@ function App() {
               className="icon-button control-muted tempo-reset"
               aria-label="Reset tempo"
               title="Back to normal speed"
-              disabled={tempo === 0}
+              disabled={tempo === 0 || djMode}
               onClick={() => changeTempo(0)}
             >
               <RotateCcw size={12} />
@@ -1254,8 +1717,8 @@ function App() {
               aria-label="Tempo"
               aria-valuemin={-MAX_TEMPO}
               aria-valuemax={MAX_TEMPO}
-              aria-valuenow={tempo}
-              aria-disabled={currentTrack ? undefined : true}
+              aria-valuenow={Math.round(tempo * 10) / 10}
+              aria-disabled={currentTrack && !djMode ? undefined : true}
               aria-valuetext={[
                 formatTempo(tempo),
                 currentBpm,
@@ -1263,8 +1726,13 @@ function App() {
               ]
                 .filter((part) => part !== null)
                 .join(', ')}
-              title="Tempo for this song: drag, or use the arrow keys (Page Up/Down for 1%); double-click to reset"
+              title={
+                djMode
+                  ? 'DJ mode sets the tempo, to match each song to the one before'
+                  : 'Tempo for this song: drag, or use the arrow keys (Page Up/Down for 1%); double-click to reset'
+              }
               onPointerDown={(event) => {
+                if (djMode) return
                 event.currentTarget.setPointerCapture(event.pointerId)
                 tempoToPointer(event.clientX)
               }}
@@ -1317,15 +1785,25 @@ function App() {
             </div>
           </div>
         </div>
-        <audio
-          ref={audioRef}
-          onTimeUpdate={(event) => setPosition(event.currentTarget.currentTime)}
-          onLoadedMetadata={(event) =>
-            setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : null)
-          }
-          onEnded={handleTrackEnded}
-          onError={handlePlaybackError}
-        />
+        {([deckA, deckB] as const).map((ref, deck) => (
+          <audio
+            key={deck}
+            ref={ref}
+            // CORS lets DJ mode's bass controls (Web Audio) hear the song; playlist-audio: allows it.
+            crossOrigin="anonymous"
+            data-deck={deck === liveDeck ? 'live' : 'standby'}
+            onTimeUpdate={(event) => {
+              if (deck === liveDeckRef.current) setPosition(event.currentTarget.currentTime)
+              djTickRef.current()
+            }}
+            onLoadedMetadata={(event) => {
+              if (deck !== liveDeckRef.current) return
+              setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : null)
+            }}
+            onEnded={() => (deck === liveDeckRef.current ? handleTrackEnded() : endMix())}
+            onError={() => (deck === liveDeckRef.current ? handlePlaybackError() : endMix())}
+          />
+        ))}
       </footer>
       <p className="visually-hidden" role="status">
         {moveStatus}

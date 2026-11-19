@@ -1,15 +1,16 @@
 import { Worker } from 'node:worker_threads'
+import type { RhythmAnalysis } from './trackRhythm'
 
 /** What `analysisWorker` can find out about a song, and what each kind of analysis reports. */
 export interface AnalysisResults {
-  tempo: number | undefined
+  rhythm: RhythmAnalysis
   key: string | undefined
 }
 export type AnalysisKind = keyof AnalysisResults
 
 /**
  * Runs one kind of analysis of a song on a worker thread from the built `analysisWorker.js` at `workerPath`, because
- * analysing audio blocks for about a second per song.
+ * analysing audio blocks for a second or two per song.
  */
 export function analyseInWorker<K extends AnalysisKind>(
   workerPath: string,

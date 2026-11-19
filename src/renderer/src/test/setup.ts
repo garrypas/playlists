@@ -109,6 +109,51 @@ Object.defineProperties(HTMLMediaElement.prototype, {
   },
 })
 
+// jsdom has no Web Audio. DJ mode only uses it for each deck's bass, sweep filters and level (the deck's <audio> feeds a
+// low-shelf, a high-pass and a low-pass filter, then a gain), so this stand-in records what each element is connected to, which tests read through
+// `testDeckGraphs` to hear the bass and level. Changes take effect at once.
+class FakeAudioParam {
+  constructor(public value = 0) {}
+  setTargetAtTime(value: number): this {
+    this.value = value
+    return this
+  }
+}
+class FakeAudioNode {
+  next: FakeAudioNode | null = null
+  connect<T extends FakeAudioNode>(destination: T): T {
+    this.next = destination
+    return destination
+  }
+}
+declare global {
+  // eslint-disable-next-line no-var
+  var testDeckGraphs: WeakMap<HTMLMediaElement, FakeAudioNode>
+}
+globalThis.testDeckGraphs = new WeakMap()
+class FakeAudioContext {
+  currentTime = 0
+  state = 'running'
+  destination = new FakeAudioNode()
+  resume(): Promise<void> {
+    return Promise.resolve()
+  }
+  sampleRate = 48000
+  createBiquadFilter(): FakeAudioNode & { type: string; frequency: FakeAudioParam; gain: FakeAudioParam; Q: FakeAudioParam } {
+    const params = { frequency: new FakeAudioParam(350), gain: new FakeAudioParam(), Q: new FakeAudioParam(1) }
+    return Object.assign(new FakeAudioNode(), { type: 'lowpass', ...params })
+  }
+  createGain(): FakeAudioNode & { gain: FakeAudioParam } {
+    return Object.assign(new FakeAudioNode(), { gain: new FakeAudioParam(1) })
+  }
+  createMediaElementSource(element: HTMLMediaElement): FakeAudioNode {
+    const source = new FakeAudioNode()
+    globalThis.testDeckGraphs.set(element, source)
+    return source
+  }
+}
+window.AudioContext = FakeAudioContext as unknown as typeof AudioContext
+
 // jsdom doesn't implement modal dialogs, pointer or drag events, or pointer capture.
 HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
   this.open = true

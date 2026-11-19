@@ -66,6 +66,15 @@ describe('streaming songs', () => {
     expect(await response.text()).toBe(body)
   })
 
+  it('lets the window’s audio graph read songs, for DJ mode’s bass controls', async () => {
+    for (const response of [
+      await request('playlist-audio://track/1'),
+      await request('playlist-audio://track/1', { Range: 'bytes=5-9' }),
+    ]) {
+      expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*')
+    }
+  })
+
   it('refuses a range past the end of the file', async () => {
     const response = await request('playlist-audio://track/1', { Range: 'bytes=50-60' })
     expect(response.status).toBe(416)

@@ -26,7 +26,7 @@ The reference below is meant to answer most questions without reading code. When
 - **In memory:** the file is read once into memory at open. All queries run against memory; nothing touches the disk until `persist()`.
 - **Persistence:** `persist()` writes `db.export()` to `playlists.sqlite3.tmp` and renames it over the real file (atomic replace, so a crash mid-write can't corrupt it). It runs at the end of every public mutating method, at the end of `open()`, and in `close()`. Each save writes the **whole file**.
 - **Foreign keys:** `PRAGMA foreign_keys = ON` at open, and again after every `persist()` because sql.js's `export()` turns them off. Without that, deleting a playlist would leave its songs behind.
-- **Concurrency:** one `PlaylistDatabase` instance, used synchronously on the main process's single thread. Worker threads (BPM/key analysis) never touch it; their results come back to main, which saves them.
+- **Concurrency:** one `PlaylistDatabase` instance, used synchronously on the main process's single thread. Worker threads (BPM/DJ-detail and key analysis) never touch it; their results come back to main, which saves them.
 - **Failure at launch:** if `openPlaylistDatabase` throws, `index.ts` shows "Database could not be opened" and quits.
 
 ## Schema
@@ -63,6 +63,8 @@ One row per **song in a playlist** (a playlist entry). The same file in two play
 | `tags_read` | `INTEGER NOT NULL DEFAULT 0` (migrated) | file | 1 once tags were read; 0 rows are re-read at launch (`filesNeedingTags`) |
 | `bpm` | `REAL` (migrated) | file | Detected BPM to 0.1, or NULL |
 | `tempo_read` | `INTEGER NOT NULL DEFAULT 0` (migrated) | file | 1 once BPM detection ran, even with no result |
+| `dj_details` | `TEXT` (migrated) | file | JSON of `DjDetails` (`src/shared/djDetails.ts`: beat grid, phrase start, sections, drops, loudness, sound bounds), about 0.5–3 kB; NULL until found. Read only by `getDjDetails(trackId)`, not by `list()`, so the list pushed after every background result stays small |
+| `dj_read` | `INTEGER NOT NULL DEFAULT 0` (migrated) | file | 1 once DJ details were found (set together with `tempo_read` by `saveRhythm`); rows at 0 are queued by `filesNeedingRhythm()` |
 | `musical_key` | `TEXT` (migrated) | file | E.g. `Ebm`, `F#`; selected `AS key` (`key` is reserved in SQL) |
 | `key_read` | `INTEGER NOT NULL DEFAULT 0` (migrated) | file | 1 once the key was found or tried |
 | `tempo_change` | `REAL NOT NULL DEFAULT 0` (migrated) | row | User's speed change in percent, ±`MAX_TEMPO_CHANGE`, to 0.1; selected `AS tempo` |
@@ -71,7 +73,7 @@ One row per **song in a playlist** (a playlist entry). The same file in two play
 
 Constraint: `UNIQUE (playlist_id, file_path)`: a file appears at most once per playlist. Inserts use `INSERT OR IGNORE`, so a duplicate is silently skipped, not an error. No other indexes exist; lookups by `file_path` scan the table, which is fine at personal-library sizes.
 
-"Belongs to **file**" means every row with that `file_path` holds the same value: writes update by `file_path` (`saveTags`, `saveTempo`, `saveKey`), and new copies copy it from an existing row (`addAudioFiles` copies `bpm/tempo_read` and `musical_key/key_read` from a row whose flag is 1; `addTrack` copies the whole row's file-level columns). "Belongs to **row**" means each playlist entry has its own, and both copies leave it at its default.
+"Belongs to **file**" means every row with that `file_path` holds the same value: writes update by `file_path` (`saveTags`, `saveRhythm`, `saveKey`), and new copies copy it from an existing row (`addAudioFiles` copies `bpm/tempo_read`, `musical_key/key_read` and `dj_details/dj_read` from a row whose flag is 1; `addTrack` copies the whole row's file-level columns). "Belongs to **row**" means each playlist entry has its own, and both copies leave it at its default.
 
 ### `app_meta`
 Key/value table (`key TEXT PRIMARY KEY, value TEXT NOT NULL`) for one-off app state:
@@ -80,9 +82,10 @@ Key/value table (`key TEXT PRIMARY KEY, value TEXT NOT NULL`) for one-off app st
 |---|---|
 | `starter_playlists_seeded` | `'1'` once the four starter playlists were created, so deleting them doesn't bring them back |
 | `tempo_detector` | Last `tempoDetectorVersion` applied by `retryMissingTempos()` (currently 2) |
+| `rhythm_detector` | Last `rhythmDetectorVersion` applied by `redetectRhythm()` (currently 4; missing counts as 1) |
 
 ### Mapping to TypeScript
-`list()` is the only read the window sees. Its `SELECT` aliases columns to the camelCase `Playlist` / `PlaylistTrack` fields in `src/shared/playlist.ts`, with tracks ordered `position, id`. `added_at`, `created_at`, `playlists.position` and the `*_read` flags are not exposed. A column the window needs must be added to that `SELECT` and to the type.
+The window sees two reads: `list()`, and `getDjDetails(trackId)` (over `playlists:dj-details`, for DJ mode, one song at a time). The `list()` `SELECT` aliases columns to the camelCase `Playlist` / `PlaylistTrack` fields in `src/shared/playlist.ts`, with tracks ordered `position, id`. `added_at`, `created_at`, `playlists.position` and the `*_read` flags are not exposed. A column the window needs must be added to that `SELECT` and to the type.
 
 ## Opening sequence
 `PlaylistDatabase.open(filePath)` runs, in order:
@@ -90,11 +93,12 @@ Key/value table (`key TEXT PRIMARY KEY, value TEXT NOT NULL`) for one-off app st
 2. `initializeSchema()`: original tables.
 3. `migrateSchema()`: add missing `playlist_tracks` columns from the `added` map; add `playlists.position` (set to `id`).
 4. `retryMissingTempos()`: if `app_meta.tempo_detector` < `tempoDetectorVersion`, reset `tempo_read` to 0 where `bpm IS NULL`, and record the version.
-5. `removeOrphanedTracks()`: delete tracks whose playlist is gone (older builds lost foreign keys after the first save).
-6. `seedStarterPlaylists()`: once ever, in a transaction.
-7. `persist()`.
+5. `redetectRhythm()`: if `app_meta.rhythm_detector` < `rhythmDetectorVersion`, reset `dj_read` to 0 on every row, and record the version. `bpm` and `dj_details` stay until `saveRhythm` replaces them.
+6. `removeOrphanedTracks()`: delete tracks whose playlist is gone (older builds lost foreign keys after the first save).
+7. `seedStarterPlaylists()`: once ever, in a transaction.
+8. `persist()`.
 
-Then `index.ts` saves tags for `filesNeedingTags()`, creates the window, and starts the BPM/key scanners on `filesNeedingTempo()` / `filesNeedingKey()` (paths with the flag at 0, in order of `MIN(id)`).
+Then `index.ts` saves tags for `filesNeedingTags()`, creates the window, and starts the scanners on `filesNeedingRhythm()` (`tempo_read = 0 OR dj_read = 0`) and `filesNeedingKey()` (`key_read = 0`): each file once, however many playlists it's in, in order of `MIN(id)`. `saveRhythm` writes `bpm`, `dj_details` and both flags together.
 
 ## Query helpers
 - `query<T>(sql, params)`: prepared statement, rows as plain objects, always freed in `finally`.
@@ -104,7 +108,7 @@ Then `index.ts` saves tags for `filesNeedingTags()`, creates the window, and sta
 - Always use `?` parameters for values. The only interpolated SQL is the constant `nextPlaylistPosition` subquery and column definitions from the `added` map.
 
 ## Tests
-- `src/main/playlistDatabase.test.ts`: each test opens a fresh database in a `mkdtempSync` folder; `reopen()` closes and reopens it to prove a change survived a restart. Describes: starter playlists, creating, renaming, deleting, songs, adding a saved song to another playlist, reordering songs, saving, song details from tags (including "upgrades a database saved by an older version": it builds the original schema by hand with `initSqlJs()`, writes it to disk and opens it), song tempo, song tempo change, song key, ordering playlists.
+- `src/main/playlistDatabase.test.ts`: each test opens a fresh database in a `mkdtempSync` folder; `reopen()` closes and reopens it to prove a change survived a restart. Describes: starter playlists, creating, renaming, deleting, songs, adding a saved song to another playlist, reordering songs, saving, song details from tags (including "upgrades a database saved by an older version": it builds the original schema by hand with `initSqlJs()`, writes it to disk and opens it), song tempo, DJ details (once per file, shared and copied, found for songs saved earlier; `rhythm(bpm)` builds a scan result), song tempo change, song key, ordering playlists.
 - New schema work should add: behavior on a fresh database, survival across `reopen()`, and an extension of the "older version" test proving old databases upgrade and keep their data.
 
 ## Pitfalls

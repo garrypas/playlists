@@ -1,7 +1,8 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { DjDetails } from '../shared/djDetails'
 import type { Playlist } from '../shared/playlist'
 import { openPlaylistDatabase } from './playlistDatabase'
 import { mp3 } from './test/mp3'
@@ -61,16 +62,16 @@ vi.mock('electron', () => {
   }
 })
 
-// The worker thread loads the built analysisWorker.js, which only exists after `npm run build`, so tests detect tempos
-// and keys on the test's own thread instead. Detection itself is real.
+// The worker thread loads the built analysisWorker.js, which only exists after `npm run build`, so tests detect tempos,
+// DJ details and keys on the test's own thread instead. Detection itself is real.
 vi.mock('./backgroundAnalysis', async (importOriginal) => {
   const original = await importOriginal<typeof import('./backgroundAnalysis')>()
-  const { detectTempo } = await import('./trackTempo')
+  const { detectRhythm } = await import('./trackRhythm')
   const { detectKey } = await import('./trackKey')
   return {
     ...original,
     analyseInWorker: (_workerPath: string, kind: string, filePath: string) =>
-      kind === 'key' ? detectKey(filePath) : detectTempo(filePath),
+      kind === 'key' ? detectKey(filePath) : detectRhythm(filePath),
   }
 })
 
@@ -310,6 +311,67 @@ describe('adding songs', () => {
   })
 })
 
+describe('dropping files on the window', () => {
+  const dropped = (name: string): string => join(music, 'dropped', name)
+
+  beforeAll(() => {
+    mkdirSync(join(music, 'dropped', 'Folder.mp3'), { recursive: true })
+    writeFileSync(dropped('Song.mp3'), mp3({ title: 'Digital Love', artist: 'Daft Punk' }))
+    writeFileSync(dropped('Loud.FLAC'), mp3())
+    writeFileSync(dropped('cover.jpg'), 'not audio')
+  })
+
+  async function newPlaylist(title: string): Promise<number> {
+    return (await invoke('playlists:create', { title })).find((playlist) => playlist.title === title)!.id
+  }
+
+  const titlesIn = (playlists: Playlist[], id: number): string[] =>
+    playlists.find((playlist) => playlist.id === id)!.tracks.map((track) => track.title)
+
+  it('adds dropped audio files to the end of the playlist, with their tags', async () => {
+    const id = await newPlaylist('Dropped')
+    const updated = await invoke('playlists:add-dropped-files', id, [dropped('Song.mp3'), dropped('Loud.FLAC')])
+    expect(titlesIn(updated, id)).toEqual(['Digital Love', 'Loud'])
+    expect(songIn(updated, dropped('Song.mp3'))).toMatchObject({ artist: 'Daft Punk' })
+  })
+
+  it.each([
+    ['a file that is not audio', () => dropped('cover.jpg')],
+    ['a missing file', () => dropped('Gone.mp3')],
+    ['a folder', () => dropped('Folder.mp3')],
+    ['a relative path', () => 'Song.mp3'],
+  ])('skips %s', async (label, path) => {
+    const id = await newPlaylist(`Skips ${label}`)
+    const updated = await invoke('playlists:add-dropped-files', id, [path(), dropped('Song.mp3')])
+    expect(updated.find((playlist) => playlist.id === id)!.tracks.map((track) => track.filePath)).toEqual([
+      dropped('Song.mp3'),
+    ])
+  })
+
+  it('adds a file once however often it is dropped', async () => {
+    const id = await newPlaylist('Once')
+    await invoke('playlists:add-dropped-files', id, [dropped('Song.mp3'), dropped('Song.mp3')])
+    const updated = await invoke('playlists:add-dropped-files', id, [dropped('Song.mp3')])
+    expect(titlesIn(updated, id)).toEqual(['Digital Love'])
+  })
+
+  it.each([
+    ['one path instead of a list', () => dropped('Song.mp3')],
+    ['a list with a number', () => [1]],
+    ['nothing', () => null],
+    ['more than 5000 files', () => Array.from({ length: 5001 }, () => '/music/a.mp3')],
+  ])('rejects dropped files sent as %s', async (_label, paths) => {
+    const id = await newPlaylist('Rejects')
+    await expect(invoke('playlists:add-dropped-files', id, paths())).rejects.toThrow('Invalid dropped files.')
+  })
+
+  it('rejects a malformed playlist ID', async () => {
+    await expect(invoke('playlists:add-dropped-files', '1', [dropped('Song.mp3')])).rejects.toThrow(
+      'Invalid playlist ID.',
+    )
+  })
+})
+
 describe('songs saved before tags were read', () => {
   it('get their tags when the app starts', async () => {
     const songs = (await invoke('playlists:list'))[3].tracks
@@ -355,6 +417,25 @@ describe('song tempo', () => {
     const playlists = await invoke('playlists:list')
     expect(songIn(playlists, savedEarlier())?.bpm).toBeNull()
     expect(songIn(playlists, join(music, 'deleted.mp3'))?.bpm).toBeNull()
+  })
+})
+
+describe('song DJ details', () => {
+  it('are read by the window for a song whose beat has been found', async () => {
+    await vi.waitFor(async () => expect(songIn(await invoke('playlists:list'), beat100())?.bpm).not.toBeNull(), {
+      timeout: 10_000,
+    })
+    const song = songIn(await invoke('playlists:list'), beat100())!
+    const details = await invoke<DjDetails | null>('playlists:dj-details', song.id)
+    expect(details?.grid?.bpm).toBeCloseTo(100, 0)
+  })
+
+  it('are unknown for a song that isn’t saved', async () => {
+    expect(await invoke('playlists:dj-details', 99_999)).toBeNull()
+  })
+
+  it.each(['7', 0, 1.5])('rejects the song %j', async (trackId) => {
+    await expect(invoke('playlists:dj-details', trackId)).rejects.toThrow('Invalid track ID.')
   })
 })
 

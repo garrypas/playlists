@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import initSqlJs from 'sql.js'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { DjDetails } from '../shared/djDetails'
 import { openPlaylistDatabase, type PlaylistDatabase } from './playlistDatabase'
+import type { RhythmAnalysis } from './trackRhythm'
 
 let userData: string
 let db: PlaylistDatabase
@@ -20,6 +22,20 @@ afterEach(() => {
 
 function titles(): string[] {
   return db.list().map((playlist) => playlist.title)
+}
+
+// What the background scan finds for a song with a steady beat at `bpm` (undefined: none).
+function rhythm(bpm: number | undefined): RhythmAnalysis {
+  const dj: DjDetails = {
+    soundStart: 0.1,
+    soundEnd: 300,
+    loudness: -8.5,
+    grid: bpm ? { bpm, firstBeat: 0.1, lastBeat: 299.5, phraseStart: 0.1, confidence: 0.95 } : null,
+    sections: [{ kind: bpm ? 'beat' : 'beatless', start: 0, end: 300 }],
+    drops: [],
+    analysedSeconds: 300,
+  }
+  return { bpm, dj }
 }
 
 async function reopen(): Promise<void> {
@@ -333,7 +349,7 @@ describe('song details from tags', () => {
     expect(db.list()[0].tracks[0]).toMatchObject({ title: 'old', albumArtist: '', trackNumber: null, discNumber: null })
     expect(db.filesNeedingTags()).toEqual(['/music/old.mp3'])
     expect(db.list()[0].tracks[0].bpm).toBeNull()
-    expect(db.filesNeedingTempo()).toEqual(['/music/old.mp3'])
+    expect(db.filesNeedingRhythm()).toEqual(['/music/old.mp3'])
     expect(db.list()[0].tracks[0].key).toBeNull()
     expect(db.filesNeedingKey()).toEqual(['/music/old.mp3'])
     // Playlists keep their creation order, and new ones go after them.
@@ -348,20 +364,20 @@ describe('song tempo', () => {
     db.addAudioFiles(first.id, ['/music/a.mp3', '/music/b.mp3'])
     db.addAudioFiles(second.id, ['/music/a.mp3'])
     expect(db.list()[0].tracks.map((track) => track.bpm)).toEqual([null, null])
-    expect(db.filesNeedingTempo()).toEqual(['/music/a.mp3', '/music/b.mp3'])
-    db.saveTempo('/music/a.mp3', 124.5)
+    expect(db.filesNeedingRhythm()).toEqual(['/music/a.mp3', '/music/b.mp3'])
+    db.saveRhythm('/music/a.mp3', rhythm(124.5))
     await reopen()
     expect(db.list()[0].tracks.map((track) => track.bpm)).toEqual([124.5, null])
     expect(db.list()[1].tracks[0].bpm).toBe(124.5)
-    expect(db.filesNeedingTempo()).toEqual(['/music/b.mp3'])
+    expect(db.filesNeedingRhythm()).toEqual(['/music/b.mp3'])
   })
 
   it('stops asking for the tempo of a song with no steady beat', () => {
     const playlist = db.list()[0]
     db.addAudioFiles(playlist.id, ['/music/ambient.mp3'])
-    db.saveTempo('/music/ambient.mp3', undefined)
+    db.saveRhythm('/music/ambient.mp3', rhythm(undefined))
     expect(db.list()[0].tracks[0].bpm).toBeNull()
-    expect(db.filesNeedingTempo()).toEqual([])
+    expect(db.filesNeedingRhythm()).toEqual([])
   })
 
   it('tries again, once, for songs an older version found no tempo for', async () => {
@@ -369,26 +385,102 @@ describe('song tempo', () => {
     const sqlJs = await initSqlJs()
     const old = new sqlJs.Database(readFileSync(join(userData, 'playlists.sqlite3')))
     old.run(`
-      INSERT INTO playlist_tracks (playlist_id, file_path, title, position, bpm, tempo_read)
-        VALUES (1, '/music/long-intro.mp3', 'long intro', 0, NULL, 1), (1, '/music/found.mp3', 'found', 1, 128, 1);
+      INSERT INTO playlist_tracks (playlist_id, file_path, title, position, bpm, tempo_read, dj_details, dj_read)
+        VALUES (1, '/music/long-intro.mp3', 'long intro', 0, NULL, 1, '{}', 1),
+          (1, '/music/found.mp3', 'found', 1, 128, 1, '{}', 1);
       DELETE FROM app_meta WHERE key = 'tempo_detector';
     `)
     writeFileSync(join(userData, 'playlists.sqlite3'), old.export())
     db = await openPlaylistDatabase(userData)
-    expect(db.filesNeedingTempo()).toEqual(['/music/long-intro.mp3'])
-    db.saveTempo('/music/long-intro.mp3', undefined)
+    expect(db.filesNeedingRhythm()).toEqual(['/music/long-intro.mp3'])
+    db.saveRhythm('/music/long-intro.mp3', rhythm(undefined))
     await reopen()
-    expect(db.filesNeedingTempo()).toEqual([])
+    expect(db.filesNeedingRhythm()).toEqual([])
     expect(db.list()[0].tracks.map((track) => track.bpm)).toEqual([null, 128])
   })
 
   it('keeps the tempo when a song is added to another playlist, without detecting it again', () => {
     const [first, second, third] = db.list()
     const song = db.addAudioFiles(first.id, ['/music/a.mp3'])[0].tracks[0]
-    db.saveTempo('/music/a.mp3', 128)
+    db.saveRhythm('/music/a.mp3', rhythm(128))
     expect(db.addTrack(second.id, song.id)[1].tracks[0].bpm).toBe(128)
     expect(db.addAudioFiles(third.id, ['/music/a.mp3'])[2].tracks[0].bpm).toBe(128)
-    expect(db.filesNeedingTempo()).toEqual([])
+    expect(db.filesNeedingRhythm()).toEqual([])
+  })
+})
+
+describe('DJ details', () => {
+  it('are found once per file, however many playlists it is in, and shared by every copy', async () => {
+    const [first, second] = db.list()
+    db.addAudioFiles(first.id, ['/music/a.mp3', '/music/b.mp3'])
+    db.addAudioFiles(second.id, ['/music/a.mp3'])
+    const [copy, other] = [db.list()[1].tracks[0], db.list()[0].tracks[1]]
+    expect(db.getDjDetails(copy.id)).toBeNull()
+    expect(db.filesNeedingRhythm()).toEqual(['/music/a.mp3', '/music/b.mp3'])
+    db.saveRhythm('/music/a.mp3', rhythm(128))
+    await reopen()
+    expect(db.getDjDetails(db.list()[0].tracks[0].id)).toEqual(rhythm(128).dj)
+    expect(db.getDjDetails(copy.id)).toEqual(rhythm(128).dj)
+    expect(db.getDjDetails(other.id)).toBeNull()
+    expect(db.filesNeedingRhythm()).toEqual(['/music/b.mp3'])
+  })
+
+  it('are kept for a song with no steady beat, without a beat grid', () => {
+    const playlist = db.list()[0]
+    const song = db.addAudioFiles(playlist.id, ['/music/ambient.mp3'])[0].tracks[0]
+    db.saveRhythm('/music/ambient.mp3', rhythm(undefined))
+    expect(db.getDjDetails(song.id)).toMatchObject({ grid: null, sections: [{ kind: 'beatless' }] })
+  })
+
+  it('are copied when a song is added to another playlist, without scanning it again', () => {
+    const [first, second, third] = db.list()
+    const song = db.addAudioFiles(first.id, ['/music/a.mp3'])[0].tracks[0]
+    db.saveRhythm('/music/a.mp3', rhythm(128))
+    const copied = db.addTrack(second.id, song.id)[1].tracks[0]
+    const added = db.addAudioFiles(third.id, ['/music/a.mp3'])[2].tracks[0]
+    expect(db.getDjDetails(copied.id)).toEqual(rhythm(128).dj)
+    expect(db.getDjDetails(added.id)).toEqual(rhythm(128).dj)
+    expect(db.filesNeedingRhythm()).toEqual([])
+  })
+
+  it('are found for songs saved before DJ details were, keeping their tempo until then', async () => {
+    db.close()
+    const sqlJs = await initSqlJs()
+    const old = new sqlJs.Database(readFileSync(join(userData, 'playlists.sqlite3')))
+    old.run(`
+      INSERT INTO playlist_tracks (playlist_id, file_path, title, position, bpm, tempo_read)
+        VALUES (1, '/music/old.mp3', 'old', 0, 126.1, 1), (2, '/music/old.mp3', 'old', 0, 126.1, 1);
+      UPDATE playlist_tracks SET dj_read = 0;
+    `)
+    writeFileSync(join(userData, 'playlists.sqlite3'), old.export())
+    db = await openPlaylistDatabase(userData)
+    expect(db.list()[0].tracks[0].bpm).toBe(126.1)
+    expect(db.filesNeedingRhythm()).toEqual(['/music/old.mp3'])
+    db.saveRhythm('/music/old.mp3', rhythm(126))
+    expect(db.list()[0].tracks[0].bpm).toBe(126)
+    expect(db.getDjDetails(db.list()[1].tracks[0].id)).toEqual(rhythm(126).dj)
+  })
+
+  it('are found again, once, after detection improves, keeping the old ones until then', async () => {
+    db.addAudioFiles(db.list()[0].id, ['/music/a.mp3'])
+    db.saveRhythm('/music/a.mp3', rhythm(127.9))
+    db.close()
+    const sqlJs = await initSqlJs()
+    const old = new sqlJs.Database(readFileSync(join(userData, 'playlists.sqlite3')))
+    old.run(`DELETE FROM app_meta WHERE key = 'rhythm_detector'`)
+    writeFileSync(join(userData, 'playlists.sqlite3'), old.export())
+    db = await openPlaylistDatabase(userData)
+    expect(db.filesNeedingRhythm()).toEqual(['/music/a.mp3'])
+    expect(db.list()[0].tracks[0].bpm).toBe(127.9)
+    expect(db.getDjDetails(db.list()[0].tracks[0].id)).toEqual(rhythm(127.9).dj)
+    db.saveRhythm('/music/a.mp3', rhythm(128))
+    await reopen()
+    expect(db.filesNeedingRhythm()).toEqual([])
+    expect(db.list()[0].tracks[0].bpm).toBe(128)
+  })
+
+  it('are unknown for a song that does not exist', () => {
+    expect(db.getDjDetails(999)).toBeNull()
   })
 })
 
@@ -460,7 +552,7 @@ describe('song key', () => {
   it('finds tempo and key separately', () => {
     const playlist = db.list()[0]
     db.addAudioFiles(playlist.id, ['/music/a.mp3'])
-    db.saveTempo('/music/a.mp3', 120)
+    db.saveRhythm('/music/a.mp3', rhythm(120))
     expect(db.filesNeedingKey()).toEqual(['/music/a.mp3'])
     expect(db.list()[0].tracks[0]).toMatchObject({ bpm: 120, key: null })
   })

@@ -3,7 +3,9 @@ import { basename, extname, join } from 'node:path'
 import initSqlJs from 'sql.js'
 import type { Database as SqlDatabase, SqlValue } from 'sql.js'
 import { MAX_TEMPO_CHANGE, type CreatePlaylistInput, type Playlist, type PlaylistTrack } from '../shared/playlist'
+import type { DjDetails } from '../shared/djDetails'
 import type { TrackTags } from './trackMetadata'
+import type { RhythmAnalysis } from './trackRhythm'
 
 const starterPlaylists = [
   { title: 'Late night drive', description: 'For the long way home.', gradient: 'sunset', icon: '◒' },
@@ -28,6 +30,7 @@ export class PlaylistDatabase {
     store.initializeSchema()
     store.migrateSchema()
     store.retryMissingTempos()
+    store.redetectRhythm()
     store.removeOrphanedTracks()
     store.seedStarterPlaylists()
     store.persist()
@@ -74,7 +77,7 @@ export class PlaylistDatabase {
   }
 
   // Adds files to the end of a playlist, using their tags where `tags` has them and the file name otherwise.
-  // A file already saved in another playlist keeps the tempo and key found for it there.
+  // A file already saved in another playlist keeps the tempo, key and DJ details found for it there.
   addAudioFiles(id: number, filePaths: string[], tags: Map<string, TrackTags> = new Map()): Playlist[] {
     const playlistId = this.requirePlaylist(id)
     this.db.run('BEGIN')
@@ -84,12 +87,15 @@ export class PlaylistDatabase {
         this.run(
           `
           INSERT OR IGNORE INTO playlist_tracks (playlist_id, file_path, title, artist, album, album_artist,
-            track_number, disc_number, duration_seconds, tags_read, bpm, tempo_read, musical_key, key_read, position)
+            track_number, disc_number, duration_seconds, tags_read, bpm, tempo_read, musical_key, key_read, dj_details,
+            dj_read, position)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             (SELECT bpm FROM playlist_tracks WHERE file_path = ? AND tempo_read = 1 LIMIT 1),
             EXISTS (SELECT 1 FROM playlist_tracks WHERE file_path = ? AND tempo_read = 1),
             (SELECT musical_key FROM playlist_tracks WHERE file_path = ? AND key_read = 1 LIMIT 1),
             EXISTS (SELECT 1 FROM playlist_tracks WHERE file_path = ? AND key_read = 1),
+            (SELECT dj_details FROM playlist_tracks WHERE file_path = ? AND dj_read = 1 LIMIT 1),
+            EXISTS (SELECT 1 FROM playlist_tracks WHERE file_path = ? AND dj_read = 1),
             (SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = ?))
         `,
           [
@@ -97,7 +103,7 @@ export class PlaylistDatabase {
             filePath,
             ...song,
             tags.has(filePath) ? 1 : 0,
-            ...[filePath, filePath, filePath, filePath],
+            ...[filePath, filePath, filePath, filePath, filePath, filePath],
             playlistId,
           ],
         )
@@ -120,9 +126,11 @@ export class PlaylistDatabase {
     this.run(
       `
       INSERT OR IGNORE INTO playlist_tracks (playlist_id, file_path, title, artist, album, album_artist,
-        track_number, disc_number, duration_seconds, tags_read, bpm, tempo_read, musical_key, key_read, position)
+        track_number, disc_number, duration_seconds, tags_read, bpm, tempo_read, musical_key, key_read, dj_details,
+        dj_read, position)
       SELECT ?, file_path, title, artist, album, album_artist, track_number, disc_number, duration_seconds, tags_read,
-        bpm, tempo_read, musical_key, key_read, (SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = ?)
+        bpm, tempo_read, musical_key, key_read, dj_details, dj_read,
+        (SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = ?)
       FROM playlist_tracks WHERE id = ?
     `,
       [playlistId, playlistId, trackId],
@@ -161,17 +169,34 @@ export class PlaylistDatabase {
     this.persist()
   }
 
-  /** Saved files whose tempo hasn't been detected yet (just added, or unreadable last time). */
-  filesNeedingTempo(): string[] {
+  /**
+   * Saved files whose tempo or DJ details haven't been found yet (just added, saved by an older version, or unreadable
+   * last time), each once however many playlists it's in.
+   */
+  filesNeedingRhythm(): string[] {
     return this.query<{ filePath: string }>(
-      'SELECT file_path AS filePath FROM playlist_tracks WHERE tempo_read = 0 GROUP BY file_path ORDER BY MIN(id)',
+      `SELECT file_path AS filePath FROM playlist_tracks WHERE tempo_read = 0 OR dj_read = 0
+      GROUP BY file_path ORDER BY MIN(id)`,
     ).map((row) => row.filePath)
   }
 
-  // Saves a file's detected tempo (undefined: it has no steady beat) on every copy of it.
-  saveTempo(filePath: string, bpm: number | undefined): void {
-    this.run('UPDATE playlist_tracks SET bpm = ?, tempo_read = 1 WHERE file_path = ?', [bpm ?? null, filePath])
+  // Saves a file's tempo (undefined: it has no steady beat) and DJ details on every copy of it.
+  saveRhythm(filePath: string, { bpm, dj }: RhythmAnalysis): void {
+    this.run('UPDATE playlist_tracks SET bpm = ?, tempo_read = 1, dj_details = ?, dj_read = 1 WHERE file_path = ?', [
+      bpm ?? null,
+      JSON.stringify(dj),
+      filePath,
+    ])
     this.persist()
+  }
+
+  /** What a DJ needs to mix a saved song (shared by every copy of its file), or null until it's been found. */
+  getDjDetails(trackId: number): DjDetails | null {
+    const saved = this.query<{ details: string | null }>(
+      'SELECT dj_details AS details FROM playlist_tracks WHERE id = ?',
+      [trackId],
+    )[0]?.details
+    return saved ? (JSON.parse(saved) as DjDetails) : null
   }
 
   /** Saved files whose key hasn't been found yet (just added, or unreadable last time). */
@@ -302,6 +327,8 @@ export class PlaylistDatabase {
       musical_key: 'TEXT',
       key_read: 'INTEGER NOT NULL DEFAULT 0',
       tempo_change: 'REAL NOT NULL DEFAULT 0',
+      dj_details: 'TEXT',
+      dj_read: 'INTEGER NOT NULL DEFAULT 0',
     }
     for (const [name, definition] of Object.entries(added)) {
       if (!columns.has(name)) this.run(`ALTER TABLE playlist_tracks ADD COLUMN ${name} ${definition}`)
@@ -371,6 +398,15 @@ export class PlaylistDatabase {
     this.run('INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)', ['tempo_detector', String(tempoDetectorVersion)])
   }
 
+  // When the beat grid or phrase detection improves, every file is analysed again, once per version. Its old tempo and
+  // DJ details stay until the new ones arrive.
+  private redetectRhythm(): void {
+    const saved = this.query<{ value: string }>('SELECT value FROM app_meta WHERE key = ?', ['rhythm_detector'])[0]
+    if (Number(saved?.value ?? 1) >= rhythmDetectorVersion) return
+    this.run('UPDATE playlist_tracks SET dj_read = 0 WHERE dj_read = 1')
+    this.run('INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)', ['rhythm_detector', String(rhythmDetectorVersion)])
+  }
+
   private seedStarterPlaylists(): void {
     const seeded = this.query<{ value: string }>('SELECT value FROM app_meta WHERE key = ?', [
       'starter_playlists_seeded',
@@ -398,6 +434,12 @@ export class PlaylistDatabase {
 // Raise this when tempo detection gets better at finding tempos, so songs it missed before are tried again.
 // 2: finds beats that start after a long intro.
 const tempoDetectorVersion = 2
+
+// Raise this when the beat grid, phrase start or other DJ details are found differently, so every file is analysed
+// again. 2: the tempo from the kicks across the whole song, kicks rather than an off-beat bassline, and bar lines from
+// where the kick returns and the level changes. 3: where in the beat the kicks fall, chosen from every phase rather
+// than the strongest line or the half beat after it. 4: each bar's level, for choosing where to bring a song in.
+const rhythmDetectorVersion = 4
 
 const nextPlaylistPosition = '(SELECT COALESCE(MAX(position), -1) + 1 FROM playlists)'
 

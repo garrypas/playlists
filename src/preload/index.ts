@@ -1,4 +1,5 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
+import type { DjDetails } from '../shared/djDetails'
 import type { CreatePlaylistInput, Playlist, PlaylistApi } from '../shared/playlist'
 
 export interface AppInfo {
@@ -15,6 +16,13 @@ const desktopApi = {
     rename: (id: number, title: string): Promise<Playlist[]> => ipcRenderer.invoke('playlists:rename', id, title),
     remove: (id: number): Promise<Playlist[]> => ipcRenderer.invoke('playlists:remove', id),
     addAudioFiles: (id: number): Promise<Playlist[]> => ipcRenderer.invoke('playlists:add-audio-files', id),
+    // Paths are read here from the dropped files themselves; a File the window made up has no path and is left out.
+    addDroppedFiles: (id: number, files: File[]): Promise<Playlist[]> =>
+      ipcRenderer.invoke(
+        'playlists:add-dropped-files',
+        id,
+        files.map((file) => webUtils.getPathForFile(file)).filter(Boolean),
+      ),
     addTrack: (playlistId: number, trackId: number): Promise<Playlist[]> =>
       ipcRenderer.invoke('playlists:add-track', playlistId, trackId),
     removeTrack: (playlistId: number, trackId: number): Promise<Playlist[]> =>
@@ -23,6 +31,7 @@ const desktopApi = {
       ipcRenderer.invoke('playlists:move-track', playlistId, trackId, toIndex),
     setTrackTempo: (trackId: number, percent: number): Promise<Playlist[]> =>
       ipcRenderer.invoke('playlists:set-track-tempo', trackId, percent),
+    djDetails: (trackId: number): Promise<DjDetails | null> => ipcRenderer.invoke('playlists:dj-details', trackId),
     move: (id: number, toIndex: number): Promise<Playlist[]> => ipcRenderer.invoke('playlists:move', id, toIndex),
     onChanged: (listener: (playlists: Playlist[]) => void): (() => void) => {
       const handler = (_event: IpcRendererEvent, playlists: Playlist[]): void => listener(playlists)

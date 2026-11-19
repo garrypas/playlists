@@ -1,6 +1,7 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect } from 'vitest'
+import type { DjDetails } from '../../../shared/djDetails'
 import App from '../App'
 import { createFakeDesktop, type FakeDesktop, type SongSpec } from './fakeDesktop'
 
@@ -25,8 +26,94 @@ export async function renderApp(playlists: { title: string; songs?: SongSpec[] }
 
 let current: FakeDesktop
 
+/** Closes the app and opens it again, keeping what it remembers on this computer (the volume, DJ mode). */
+export async function relaunch(playlists: { title: string; songs?: SongSpec[] }[]): Promise<AppHarness> {
+  cleanup()
+  return renderApp(playlists)
+}
+
+// The deck playing the current song (the other deck only plays during a DJ-mode mix).
 function audio(): HTMLAudioElement {
-  return document.querySelector('audio')!
+  return document.querySelector<HTMLAudioElement>('audio[data-deck="live"]')!
+}
+
+function songOn(deck: HTMLAudioElement): string | undefined {
+  const id = /^playlist-audio:\/\/track\/(\d+)$/.exec(deck.src)?.[1]
+  return id ? current.titleOf(Number(id)) : undefined
+}
+
+export interface HeardSong {
+  volume: number
+  speed: number
+  bass: boolean
+  /** Only while a DJ-mode filter is sweeping the song: its lows going (high-pass) or its highs (low-pass). */
+  filter?: 'high-pass' | 'low-pass'
+}
+
+/**
+ * Every song you can hear right now, by title: how loud (0–100), how fast (percent of normal speed), whether its
+ * bass is in (DJ mode cuts one song's bass while two play), and any filter sweeping it. Songs playing silently aren't
+ * heard.
+ */
+export function heard(): Record<string, HeardSong> {
+  const songs: Record<string, HeardSong> = {}
+  for (const deck of document.querySelectorAll('audio')) {
+    // Through Web Audio (once DJ mode has been on): filters (which have a frequency), then a gain.
+    let bassDb = 0
+    let level = 1
+    let filter: HeardSong['filter']
+    for (let node = globalThis.testDeckGraphs.get(deck)?.next; node; node = node.next) {
+      const { gain, frequency, type } = node as unknown as { gain?: { value: number }; frequency?: { value: number }; type?: string }
+      if (type === 'lowshelf') bassDb = gain!.value
+      else if (type === 'highpass' && frequency!.value > 40) filter = 'high-pass'
+      else if (type === 'lowpass' && frequency!.value < 10000) filter = 'low-pass'
+      else if (!frequency && gain) level *= gain.value
+    }
+    const volume = deck.muted ? 0 : Math.round(deck.volume * level * 100)
+    const song = songOn(deck)
+    if (deck.paused || volume === 0 || !song) continue
+    songs[song] = { volume, speed: Math.round(deck.playbackRate * 1000) / 10, bass: bassDb > -6, ...(filter && { filter }) }
+  }
+  return songs
+}
+
+export function djModeButton(): HTMLElement {
+  return screen.getByRole('button', { name: 'DJ mode' })
+}
+
+/** What DJ mode says it's doing, e.g. "DJ: 16-bar blend into Two at 3:44"; undefined while it's off. */
+export function djStatus(): string | undefined {
+  return announcements().find((text) => text.startsWith('DJ:'))
+}
+
+/**
+ * What background analysis finds in a steady dance track: `bars` bars of kicks at `bpm` from `firstBeat`, with
+ * phrases from `phraseStart`, any drops (seconds), and optionally a quiet intro (`quietBars` bars, 9 dB down).
+ */
+export function djTrack(
+  bpm: number,
+  {
+    bars,
+    firstBeat = 0,
+    phraseStart = firstBeat,
+    drops = [],
+    quietBars = 0,
+  }: { bars: number; firstBeat?: number; phraseStart?: number; drops?: number[]; quietBars?: number },
+): DjDetails {
+  const beat = 60 / bpm
+  const lastBeat = firstBeat + (bars * 4 - 1) * beat
+  // Every bar at the song's usual level (-9 dB), except a quiet intro of `quietBars` bars, 9 dB down.
+  const db = Array.from({ length: bars }, (_, bar) => (bar < quietBars ? -18 : -9))
+  const barLevels = { from: firstBeat, db, lowDb: db }
+  return {
+    soundStart: firstBeat,
+    soundEnd: lastBeat + beat,
+    loudness: -9,
+    grid: { bpm, firstBeat, lastBeat, phraseStart, confidence: 0.95, barLevels },
+    sections: [{ kind: 'beat', start: firstBeat, end: lastBeat + beat }],
+    drops,
+    analysedSeconds: lastBeat + beat + 5,
+  }
 }
 
 /**
@@ -42,9 +129,8 @@ export function player(): {
   speed: number
   keepsPitch: boolean
 } {
-  const id = /^playlist-audio:\/\/track\/(\d+)$/.exec(audio().src)?.[1]
   return {
-    song: id ? current.titleOf(Number(id)) : undefined,
+    song: songOn(audio()),
     playing: !audio().paused,
     time: audio().currentTime,
     volume: audio().muted ? 0 : Math.round(audio().volume * 100),
@@ -88,10 +174,15 @@ export function songLoaded(durationSeconds: number): void {
   fireEvent.loadedMetadata(audio())
 }
 
-/** Playback has reached `seconds` into the song. */
+/** Playback has reached `seconds` into the song. A song mixing in on the other deck moves on by the same real time. */
 export function playTo(seconds: number): void {
-  audio().currentTime = seconds
-  fireEvent.timeUpdate(audio())
+  const live = audio()
+  const realSeconds = (seconds - live.currentTime) / live.playbackRate
+  for (const deck of document.querySelectorAll('audio')) {
+    if (deck !== live && !deck.paused && realSeconds > 0) deck.currentTime += realSeconds * deck.playbackRate
+  }
+  live.currentTime = seconds
+  fireEvent.timeUpdate(live)
 }
 
 export function songEnds(): void {
@@ -243,3 +334,31 @@ export function queueButton(): HTMLElement {
 }
 
 export { within }
+
+/** The open playlist's song list, where audio files from Finder or Explorer can be dropped. */
+export function playlistSongsArea(title: string): HTMLElement {
+  return screen.getByRole('region', { name: title })
+}
+
+// What a drag from Finder or Explorer carries: files (by name; the fake desktop finds them in /music).
+function draggedFiles(names: string[]): { dataTransfer: Partial<DataTransfer> } {
+  const files = names.map((name) => new File(['audio'], name))
+  return { dataTransfer: { files: files as unknown as FileList, types: ['Files'], dropEffect: 'none' } }
+}
+
+/** Drags files from Finder or Explorer over `target` without dropping them. */
+export function dragFilesOver(target: HTMLElement, names: string[]): void {
+  fireEvent.dragOver(target, draggedFiles(names))
+}
+
+/** Drags files from Finder or Explorer away from `target` and out of the window. */
+export function dragFilesAway(target: HTMLElement): void {
+  fireEvent.dragLeave(target, { relatedTarget: null, ...draggedFiles([]) })
+}
+
+/** Drops files from Finder or Explorer onto `target`, then waits for them to be saved. */
+export async function dropFiles(target: HTMLElement, names: string[]): Promise<void> {
+  fireEvent.dragOver(target, draggedFiles(names))
+  fireEvent.drop(target, draggedFiles(names))
+  await act(async () => {})
+}

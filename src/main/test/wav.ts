@@ -40,6 +40,64 @@ export function beat(bpm: number, seconds = 30, { introSeconds = 0 } = {}): Buff
   return wav(samples)
 }
 
+/** A part of a `song`: how many bars (of 4 beats) it lasts, whether it has a kick on every beat and a bass pad. */
+export interface SongPart {
+  bars: number
+  kick?: boolean
+  pad?: boolean
+  /** How loud the part is, from 0 to 1 (full). */
+  level?: number
+  /** The beat of the part (from 0) on which the kick comes in. */
+  kickFromBeat?: number
+  /**
+   * A bass note on every off-beat, ducked just before the beat (as a sidechained trance bassline is). It starts from
+   * near silence, so it rises more sharply than the kick, which hits while the bass is still fading; but the kick is
+   * louder.
+   */
+  offbeatBass?: boolean
+  /** An open hi-hat (a burst of noise) on every off-beat. */
+  hats?: boolean
+}
+
+// Noise that's the same on every run, so test files don't change.
+function noise(): () => number {
+  let seed = 1
+  return () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648
+    return (seed / 2147483648) * 2 - 1
+  }
+}
+
+/** A dance track at `bpm` made of `parts` one after another, after `silenceSeconds` of silence. */
+export function song(bpm: number, parts: SongPart[], { silenceSeconds = 0 } = {}): Buffer {
+  const rate = 44100
+  const beatSeconds = 60 / bpm
+  const seconds = silenceSeconds + parts.reduce((total, part) => total + part.bars * 4 * beatSeconds, 0)
+  const samples = new Float32Array(Math.round(rate * seconds))
+  let partStart = silenceSeconds
+  const hiss = noise()
+  for (const part of parts) {
+    const { bars, kick = false, pad = false, level = 1, kickFromBeat = 0, offbeatBass = false, hats = false } = part
+    const partEnd = partStart + bars * 4 * beatSeconds
+    for (let i = Math.round(partStart * rate); i < Math.min(samples.length, Math.round(partEnd * rate)); i++) {
+      const time = i / rate
+      const sinceBeat = (time - partStart) % beatSeconds
+      const kickOn = kick && Math.floor((time - partStart) / beatSeconds) >= kickFromBeat
+      const kickSample = kickOn ? Math.sin(2 * Math.PI * 70 * sinceBeat) * Math.exp(-25 * sinceBeat) * 0.6 : 0
+      const padSample = pad ? Math.sin(2 * Math.PI * 55 * time) * 0.3 : 0
+      const sinceOffbeat = sinceBeat - beatSeconds / 2
+      // Ducked over the last 10 ms before the beat (cutting it dead would click).
+      const duck = Math.min(1, (beatSeconds - sinceBeat) / 0.01)
+      const bassSample =
+        offbeatBass && sinceOffbeat >= 0 ? Math.sin(2 * Math.PI * 45 * sinceOffbeat) * 0.15 * duck : 0
+      const hatSample = hats && sinceOffbeat >= 0 ? hiss() * Math.exp(-60 * sinceOffbeat) * 0.15 : 0
+      samples[i] = (kickSample + padSample + bassSample + hatSample) * level
+    }
+    partStart = partEnd
+  }
+  return wav(samples)
+}
+
 /** `seconds` of silence. */
 export function silence(seconds = 10): Buffer {
   return wav(new Float32Array(44100 * seconds))
