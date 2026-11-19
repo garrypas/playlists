@@ -6,6 +6,7 @@
 // - Creates the branch ruleset in .github/rulesets/main.json, or updates the ruleset with the same name.
 // - Requires a maintainer to approve workflow runs for every outside contributor's PR. A fork PR's workflows could
 //   otherwise report a fake check with the name of a required one (`Approval`, `Check (...)`).
+// - Deletes a PR's branch automatically once the PR is merged.
 
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
@@ -37,8 +38,10 @@ try {
     ['api', '--method', 'PUT', `repos/${repo}/actions/permissions/fork-pr-contributor-approval`, '--input', '-'],
     JSON.stringify({ approval_policy: 'all_external_contributors' }),
   )
+  console.log('Workflow runs from outside contributors now need a maintainer to approve them.')
+  gh(['api', '--method', 'PATCH', `repos/${repo}`, '--input', '-'], JSON.stringify({ delete_branch_on_merge: true }))
+  console.log('Branches are now deleted automatically once their PR is merged.')
 } catch {
-  console.error('The ruleset is saved, but setting workflow approval for outside contributors failed. Run this again.')
+  console.error('The ruleset is saved, but a repository setting failed to apply. Run this again.')
   process.exit(1)
 }
-console.log('Workflow runs from outside contributors now need a maintainer to approve them.')
