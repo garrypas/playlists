@@ -334,3 +334,31 @@ export function queueButton(): HTMLElement {
 }
 
 export { within }
+
+/** The open playlist's song list, where audio files from Finder or Explorer can be dropped. */
+export function playlistSongsArea(title: string): HTMLElement {
+  return screen.getByRole('region', { name: title })
+}
+
+// What a drag from Finder or Explorer carries: files (by name; the fake desktop finds them in /music).
+function draggedFiles(names: string[]): { dataTransfer: Partial<DataTransfer> } {
+  const files = names.map((name) => new File(['audio'], name))
+  return { dataTransfer: { files: files as unknown as FileList, types: ['Files'], dropEffect: 'none' } }
+}
+
+/** Drags files from Finder or Explorer over `target` without dropping them. */
+export function dragFilesOver(target: HTMLElement, names: string[]): void {
+  fireEvent.dragOver(target, draggedFiles(names))
+}
+
+/** Drags files from Finder or Explorer away from `target` and out of the window. */
+export function dragFilesAway(target: HTMLElement): void {
+  fireEvent.dragLeave(target, { relatedTarget: null, ...draggedFiles([]) })
+}
+
+/** Drops files from Finder or Explorer onto `target`, then waits for them to be saved. */
+export async function dropFiles(target: HTMLElement, names: string[]): Promise<void> {
+  fireEvent.dragOver(target, draggedFiles(names))
+  fireEvent.drop(target, draggedFiles(names))
+  await act(async () => {})
+}

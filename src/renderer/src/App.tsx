@@ -24,7 +24,12 @@ import {
   X,
 } from 'lucide-react'
 import type { DjDetails } from '../../shared/djDetails'
-import { MAX_TEMPO_CHANGE as MAX_TEMPO, type Playlist, type PlaylistTrack } from '../../shared/playlist'
+import {
+  isAudioFileName,
+  MAX_TEMPO_CHANGE as MAX_TEMPO,
+  type Playlist,
+  type PlaylistTrack,
+} from '../../shared/playlist'
 import { createDeckEq, type DeckEq } from './dj/deckEq'
 import {
   incomingTimeAt,
@@ -206,6 +211,11 @@ function App() {
   // The same, for dragging playlists in the sidebar.
   const [draggedPlaylistId, setDraggedPlaylistId] = useState<number | null>(null)
   const [playlistDropSlot, setPlaylistDropSlot] = useState<number | null>(null)
+  // Where audio files dragged in from Finder or Explorer would drop: the open playlist's song list, or a playlist in
+  // the sidebar (by ID). Then what the last drop added, shown under the sidebar's playlists for a few seconds.
+  const [fileDropTarget, setFileDropTarget] = useState<'list' | number | null>(null)
+  const [fileDropStatus, setFileDropStatus] = useState('')
+  const fileDropStatusTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const queueButtonRef = useRef<HTMLButtonElement>(null)
   const [view, setView] = useState<'home' | 'explore' | 'library'>('home')
   const [source, setSource] = useState<PlaySource>('playlist')
@@ -940,6 +950,59 @@ function App() {
     }
   }
 
+  function showFileDropStatus(message: string): void {
+    setFileDropStatus(message)
+    clearTimeout(fileDropStatusTimer.current)
+    fileDropStatusTimer.current = setTimeout(() => setFileDropStatus(''), 6000)
+  }
+
+  useEffect(() => () => clearTimeout(fileDropStatusTimer.current), [])
+
+  // Adds audio files dropped from Finder or Explorer to the end of `playlist`; anything else in the drop is skipped.
+  async function addDroppedFiles(playlist: Playlist, files: File[]): Promise<void> {
+    const audioFiles = files.filter((file) => isAudioFileName(file.name))
+    const skipped = files.length - audioFiles.length
+    if (audioFiles.length === 0) {
+      showFileDropStatus('Only audio files can be added: MP3, M4A, AAC, WAV, AIFF, FLAC, OGG or Opus.')
+      return
+    }
+    try {
+      const updated = await window.desktop.playlists.addDroppedFiles(playlist.id, audioFiles)
+      const added = (updated.find((item) => item.id === playlist.id)?.tracks.length ?? 0) - playlist.tracks.length
+      applyPlaylists(updated)
+      const skippedNote = skipped === 0 ? '' : ` Skipped ${skipped} ${skipped === 1 ? 'file that isn’t' : 'files that aren’t'} audio.`
+      showFileDropStatus(
+        (added > 0
+          ? `Added ${added} ${added === 1 ? 'song' : 'songs'} to ${playlist.title}.`
+          : `${audioFiles.length === 1 ? 'That song is' : 'Those songs are'} already in ${playlist.title}.`) + skippedNote,
+      )
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Could not add audio files.')
+    }
+  }
+
+  // Files from outside the app (not a song or playlist being moved within it).
+  function draggingFiles(event: React.DragEvent): boolean {
+    return event.dataTransfer?.types.includes('Files') ?? false
+  }
+
+  function allowFileDrop(event: React.DragEvent, target: 'list' | number): void {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+    setFileDropTarget(target)
+  }
+
+  function leaveFileDrop(event: React.DragEvent, target: 'list' | number): void {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+    setFileDropTarget((current) => (current === target ? null : current))
+  }
+
+  function dropFiles(event: React.DragEvent, playlist: Playlist): void {
+    event.preventDefault()
+    setFileDropTarget(null)
+    void addDroppedFiles(playlist, [...event.dataTransfer.files])
+  }
+
   async function removeTrack(trackId: number): Promise<void> {
     if (!selectedPlaylist) return
     try {
@@ -1179,7 +1242,7 @@ function App() {
               <li key={playlist.id}>
                 <button
                   onClick={() => selectPlaylist(playlist)}
-                  className={`playlist-nav ${view === 'home' && selectedPlaylist?.id === playlist.id ? 'chosen' : ''} ${draggedPlaylistId === playlist.id ? 'playlist-dragging' : ''} ${draggedPlaylistId === null ? '' : dropLine(playlistDropSlot, playlists.findIndex((item) => item.id === draggedPlaylistId), index, playlists.length)}`}
+                  className={`playlist-nav ${view === 'home' && selectedPlaylist?.id === playlist.id ? 'chosen' : ''} ${draggedPlaylistId === playlist.id ? 'playlist-dragging' : ''} ${fileDropTarget === playlist.id ? 'file-drop-target' : ''} ${draggedPlaylistId === null ? '' : dropLine(playlistDropSlot, playlists.findIndex((item) => item.id === draggedPlaylistId), index, playlists.length)}`}
                   title={playlists.length > 1 ? 'Drag, or press Alt+↑/↓, to reorder' : undefined}
                   aria-keyshortcuts={playlists.length > 1 ? 'Alt+ArrowUp Alt+ArrowDown' : undefined}
                   draggable={playlists.length > 1}
@@ -1192,11 +1255,14 @@ function App() {
                     }
                   }}
                   onDragOver={(event) => {
+                    if (draggingFiles(event)) return allowFileDrop(event, playlist.id)
                     if (draggedPlaylistId === null) return
                     event.preventDefault()
                     setPlaylistDropSlot(dropSlotAt(event, index))
                   }}
+                  onDragLeave={(event) => leaveFileDrop(event, playlist.id)}
                   onDrop={(event) => {
+                    if (draggingFiles(event)) return dropFiles(event, playlist)
                     if (draggedPlaylistId === null) return
                     event.preventDefault()
                     dropDraggedPlaylist(dropSlotAt(event, index))
@@ -1213,6 +1279,9 @@ function App() {
           </ul>
 
           {!loading && playlists.length === 0 && <p className="sidebar-empty">Create a playlist to get started.</p>}
+          <p className="file-drop-status" role="status">
+            {fileDropStatus}
+          </p>
         </div>
       </aside>
 
@@ -1309,11 +1378,26 @@ function App() {
               </div>
             </section>
 
-            <section className="tracks-section">
+            <section
+              className={`tracks-section ${fileDropTarget === 'list' ? 'file-drop-target' : ''}`}
+              aria-labelledby="playlist-songs-heading"
+              onDragOver={(event) => {
+                if (selectedPlaylist && draggingFiles(event)) allowFileDrop(event, 'list')
+              }}
+              onDragLeave={(event) => leaveFileDrop(event, 'list')}
+              onDrop={(event) => {
+                if (selectedPlaylist && draggingFiles(event)) dropFiles(event, selectedPlaylist)
+              }}
+            >
+              {fileDropTarget === 'list' && selectedPlaylist && (
+                <p className="file-drop-hint" aria-hidden="true">
+                  <Plus size={18} /> Drop to add to {selectedPlaylist.title}
+                </p>
+              )}
               <div className="section-title-row track-heading">
                 <div>
                   <p className="eyebrow">SAVED ON THIS DEVICE</p>
-                  <h2>{selectedPlaylist ? selectedPlaylist.title : 'Choose a playlist'}</h2>
+                  <h2 id="playlist-songs-heading">{selectedPlaylist ? selectedPlaylist.title : 'Choose a playlist'}</h2>
                 </div>
                 <div className="playlist-actions">
                   <label className="search-field">
@@ -1327,7 +1411,7 @@ function App() {
                   </label>
                   <button
                     className="small-action"
-                    title="Add audio files from this computer to the playlist"
+                    title="Add audio files from this computer to the playlist (or drag them onto it)"
                     onClick={() => void addAudioFiles()}
                     disabled={!selectedPlaylist}
                   >
@@ -1467,7 +1551,7 @@ function App() {
                     {query
                       ? `No songs match “${query}”.`
                       : selectedPlaylist
-                        ? 'This playlist is empty. Add songs from your music library to get started.'
+                        ? 'This playlist is empty. Add songs, or drag audio files here from your computer.'
                         : 'Create a playlist to get started.'}
                   </p>
                 )}

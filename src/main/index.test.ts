@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -308,6 +308,67 @@ describe('adding songs', () => {
     const playlist = (await invoke('playlists:list'))[1]
     const updated = await invoke('playlists:add-audio-files', playlist.id, ['/etc/passwd'])
     expect(updated[1].tracks).toEqual(playlist.tracks)
+  })
+})
+
+describe('dropping files on the window', () => {
+  const dropped = (name: string): string => join(music, 'dropped', name)
+
+  beforeAll(() => {
+    mkdirSync(join(music, 'dropped', 'Folder.mp3'), { recursive: true })
+    writeFileSync(dropped('Song.mp3'), mp3({ title: 'Digital Love', artist: 'Daft Punk' }))
+    writeFileSync(dropped('Loud.FLAC'), mp3())
+    writeFileSync(dropped('cover.jpg'), 'not audio')
+  })
+
+  async function newPlaylist(title: string): Promise<number> {
+    return (await invoke('playlists:create', { title })).find((playlist) => playlist.title === title)!.id
+  }
+
+  const titlesIn = (playlists: Playlist[], id: number): string[] =>
+    playlists.find((playlist) => playlist.id === id)!.tracks.map((track) => track.title)
+
+  it('adds dropped audio files to the end of the playlist, with their tags', async () => {
+    const id = await newPlaylist('Dropped')
+    const updated = await invoke('playlists:add-dropped-files', id, [dropped('Song.mp3'), dropped('Loud.FLAC')])
+    expect(titlesIn(updated, id)).toEqual(['Digital Love', 'Loud'])
+    expect(songIn(updated, dropped('Song.mp3'))).toMatchObject({ artist: 'Daft Punk' })
+  })
+
+  it.each([
+    ['a file that is not audio', () => dropped('cover.jpg')],
+    ['a missing file', () => dropped('Gone.mp3')],
+    ['a folder', () => dropped('Folder.mp3')],
+    ['a relative path', () => 'Song.mp3'],
+  ])('skips %s', async (label, path) => {
+    const id = await newPlaylist(`Skips ${label}`)
+    const updated = await invoke('playlists:add-dropped-files', id, [path(), dropped('Song.mp3')])
+    expect(updated.find((playlist) => playlist.id === id)!.tracks.map((track) => track.filePath)).toEqual([
+      dropped('Song.mp3'),
+    ])
+  })
+
+  it('adds a file once however often it is dropped', async () => {
+    const id = await newPlaylist('Once')
+    await invoke('playlists:add-dropped-files', id, [dropped('Song.mp3'), dropped('Song.mp3')])
+    const updated = await invoke('playlists:add-dropped-files', id, [dropped('Song.mp3')])
+    expect(titlesIn(updated, id)).toEqual(['Digital Love'])
+  })
+
+  it.each([
+    ['one path instead of a list', () => dropped('Song.mp3')],
+    ['a list with a number', () => [1]],
+    ['nothing', () => null],
+    ['more than 5000 files', () => Array.from({ length: 5001 }, () => '/music/a.mp3')],
+  ])('rejects dropped files sent as %s', async (_label, paths) => {
+    const id = await newPlaylist('Rejects')
+    await expect(invoke('playlists:add-dropped-files', id, paths())).rejects.toThrow('Invalid dropped files.')
+  })
+
+  it('rejects a malformed playlist ID', async () => {
+    await expect(invoke('playlists:add-dropped-files', '1', [dropped('Song.mp3')])).rejects.toThrow(
+      'Invalid playlist ID.',
+    )
   })
 })
 

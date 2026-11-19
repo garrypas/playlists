@@ -24,6 +24,7 @@ Use Node 24 (`.nvmrc`; run `nvm use` first; `engines` and CI both rely on it).
 - `build/` — app icon (`icon.svg` source, `icon.png` for electron-builder and dev)
 - `.github/workflows/ci.yml` — typecheck, test and build on macOS and Windows for pushes to `main` and PRs
 - `.github/workflows/release.yml` — on a `v*` tag: set the version, run CI, build macOS (x64, arm64; ad-hoc signed, no certificate) and unsigned Windows installers, publish a GitHub release. Each architecture is packaged separately so it bundles its own ffmpeg (`asarUnpack`)
+- `.github/dependabot.yml` — Dependabot raises PRs for vulnerable npm packages and GitHub Actions (security updates only, no routine version bumps)
 - `.claude/` — Claude Code config. Hooks and settings only work in Claude Code; the docs below are plain Markdown for any agent.
 
 ### Reference docs
@@ -63,7 +64,7 @@ These hold the detail this guide leaves out. Skip each file's frontmatter and re
 - UI in the renderer, desktop/native behavior in main.
 - Preload exposes only explicit typed methods, never Electron objects. Main validates every IPC input.
 - Keep `contextIsolation: true`, `nodeIntegration: false` and renderer sandboxing.
-- File paths reach the database only from `dialog.showOpenDialog` in main, never from the renderer.
+- File paths reach the database only from `dialog.showOpenDialog` in main, or from files the user dropped on the window (the preload reads them from the dropped `File` objects with `webUtils.getPathForFile`, and main checks them again). Never as path strings from the renderer.
 - Loosen the CSP only for a specific need, and never in production builds to make dev work.
 - New windows, navigation away and permission grants stay denied (`src/main/index.ts`).
 - Never modify files outside this project; ask before writing outside the repo or running commands outside your tool's sandbox.

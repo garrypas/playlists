@@ -1,6 +1,6 @@
 import type { DesktopApi } from '../../../preload'
 import type { DjDetails } from '../../../shared/djDetails'
-import type { Playlist, PlaylistTrack } from '../../../shared/playlist'
+import { isAudioFileName, type Playlist, type PlaylistTrack } from '../../../shared/playlist'
 
 export type SongSpec =
   | string
@@ -145,6 +145,17 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
             playlist.tracks.push(track(title, playlist.tracks.length, path))
           }
           picked = []
+        }),
+      // Dropped files are found in /music by name (jsdom's files have no path). Like main, files that aren't audio or
+      // are already in the playlist are skipped.
+      addDroppedFiles: (id, files) =>
+        call('playlists:add-dropped-files', () => {
+          const playlist = find(id)
+          for (const file of files) {
+            const path = `/music/${file.name}`
+            if (!isAudioFileName(file.name) || playlist.tracks.some((item) => item.filePath === path)) continue
+            playlist.tracks.push(track(file.name.replace(/\.[^.]+$/, ''), playlist.tracks.length, path))
+          }
         }),
       addTrack: (playlistId, trackId) =>
         call('playlists:add-track', () => {

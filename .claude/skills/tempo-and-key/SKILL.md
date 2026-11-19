@@ -31,7 +31,7 @@ If the code and this file disagree, the code wins: say so, and fix this file in 
 | `src/main/trackKey.ts` | `parseKey(tag)`, `keyOfSamples(samples)`, `detectKey(filePath)`: tag first, then the audio |
 | `src/main/backgroundAnalysis.ts` | `analyseInWorker(workerPath, kind, filePath)`, `createBackgroundScanner(detect, onDetected)`, `AnalysisResults` type (`rhythm`, `key`) |
 | `src/main/analysisWorker.ts` | Worker-thread entry. Gets `{ kind, filePath }` and posts back `{ value }` or `{ error }` |
-| `src/main/index.ts` | `rhythmScanner` and `keyScanner`, `scanForMissingDetails()` (after add-audio-files and at launch), `sendPlaylistsToWindows()` (on `playlists:changed`), stopping both scanners on `before-quit` |
+| `src/main/index.ts` | `rhythmScanner` and `keyScanner`, `scanForMissingDetails()` (after add-audio-files, add-dropped-files and at launch), `sendPlaylistsToWindows()` (on `playlists:changed`), stopping both scanners on `before-quit` |
 | `src/main/playlistDatabase.ts` | `saveRhythm` / `filesNeedingRhythm` (BPM with DJ details), `saveKey` / `filesNeedingKey`, copying bpm, key and DJ details into new copies of a file, `retryMissingTempos` |
 | `electron.vite.config.ts` | Main build inputs `index` and `analysisWorker` (the latter becomes `out/main/analysisWorker.js`) |
 | `src/renderer/src/trackDisplay.ts` | `formatBpm(bpm, tempo)`, `formatPlayerBpm(bpm, tempo)`, `formatKey(key, tempo)`, `semitoneShift(tempo)` |
@@ -41,7 +41,7 @@ If the code and this file disagree, the code wins: say so, and fix this file in 
 
 ## End-to-end flow
 **Adding songs:**
-1. `playlists:add-audio-files` shows the native dialog, reads the tags, and calls `addAudioFiles`.
+1. `playlists:add-audio-files` shows the native dialog, or `playlists:add-dropped-files` takes files dragged onto the window. Either way, main reads the tags and calls `addAudioFiles`.
 2. New rows copy `bpm`/`tempo_read`, `musical_key`/`key_read` and `dj_details`/`dj_read` from any existing row for the same `file_path` whose flag is 1, so the same file isn't analysed twice.
 3. `scanForMissingDetails()` queues each file once: the rhythm scanner gets those with `tempo_read = 0 OR dj_read = 0`, the key scanner those with `key_read = 0`.
 
