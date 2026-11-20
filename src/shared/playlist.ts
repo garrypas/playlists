@@ -44,8 +44,16 @@ export interface Playlist {
   description: string
   gradient: string
   icon: string
+  /**
+   * Changes whenever the user chooses a new image for the playlist's cover; null when it has none and shows its
+   * gradient and symbol. The image itself is served at `playlist-audio://playlist-image/<id>?v=<imageVersion>`.
+   */
+  imageVersion: number | null
   tracks: PlaylistTrack[]
 }
+
+/** The image file types a playlist cover can be chosen from (lower case, without the dot). */
+export const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png'] as const
 
 export interface CreatePlaylistInput {
   title: string
@@ -76,6 +84,13 @@ export interface PlaylistApi {
   djDetails(trackId: number): Promise<DjDetails | null>
   /** Moves a playlist to `toIndex` in the list of playlists. */
   move(id: number, toIndex: number): Promise<Playlist[]>
+  /**
+   * Lets the user pick an image (JPEG or PNG) in the system file dialog and makes it the playlist's cover. Cancelling
+   * changes nothing. Rejects with a message when the file can't be read as an image.
+   */
+  chooseImage(id: number): Promise<Playlist[]>
+  /** Removes the playlist's chosen image, so its cover shows its gradient and symbol again. */
+  removeImage(id: number): Promise<Playlist[]>
   /**
    * Calls `listener` with the full playlist list whenever it changes in the background (e.g. a song's tempo or key is found).
    * Returns a function that stops listening.

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -21,7 +21,28 @@ const electron = vi.hoisted(() => ({
   permissionRequestHandler: undefined as Handler | undefined,
   permissionCheckHandler: undefined as Handler | undefined,
   openDialogResult: { canceled: true, filePaths: [] as string[] },
+  /** The custom protocol handler main registers, so tests can fetch from it like the window does. */
+  protocolHandler: undefined as ((request: Request) => Response | Promise<Response>) | undefined,
 }))
+
+// Electron's nativeImage needs the Electron runtime, so this stand-in "decodes" PNG files by their header (and nothing
+// else, like a file that isn't an image) and "encodes" a JPEG that records the size it was cropped and shrunk to.
+interface FakeImage {
+  isEmpty: () => boolean
+  getSize: () => { width: number; height: number }
+  crop: (rect: { x: number; y: number; width: number; height: number }) => FakeImage
+  resize: (size: { width: number; height: number }) => FakeImage
+  toJPEG: (quality: number) => Buffer
+}
+function fakeImage(width: number, height: number, crop = ''): FakeImage {
+  return {
+    isEmpty: () => width === 0,
+    getSize: () => ({ width, height }),
+    crop: (rect) => fakeImage(rect.width, rect.height, `${rect.x},${rect.y}`),
+    resize: (size) => fakeImage(size.width, size.height, crop),
+    toJPEG: () => Buffer.from(`jpeg ${width}x${height} from ${crop}`),
+  }
+}
 
 vi.mock('electron', () => {
   class BrowserWindow {
@@ -48,7 +69,19 @@ vi.mock('electron', () => {
       showErrorBox: vi.fn(),
     },
     ipcMain: { handle: (channel: string, handler: Handler) => electron.ipcHandlers.set(channel, handler) },
-    protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
+    protocol: {
+      registerSchemesAsPrivileged: vi.fn(),
+      handle: (_scheme: string, handler: (request: Request) => Response | Promise<Response>) => {
+        electron.protocolHandler = handler
+      },
+    },
+    nativeImage: {
+      createFromPath: (path: string) => {
+        const bytes = readFileSync(path)
+        const isPng = bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))
+        return isPng ? fakeImage(bytes.readUInt32BE(16), bytes.readUInt32BE(20)) : fakeImage(0, 0)
+      },
+    },
     session: {
       defaultSession: {
         setPermissionRequestHandler: (handler: Handler) => {
@@ -308,6 +341,84 @@ describe('adding songs', () => {
     const playlist = (await invoke('playlists:list'))[1]
     const updated = await invoke('playlists:add-audio-files', playlist.id, ['/etc/passwd'])
     expect(updated[1].tracks).toEqual(playlist.tracks)
+  })
+})
+
+describe('playlist cover images', () => {
+  // A PNG header saying how big the image is: all the fake nativeImage reads.
+  function png(name: string, width: number, height: number): string {
+    const header = Buffer.alloc(24)
+    Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').copy(header)
+    header.writeUInt32BE(width, 16)
+    header.writeUInt32BE(height, 20)
+    writeFileSync(join(music, name), header)
+    return join(music, name)
+  }
+
+  async function coverOf(playlistId: number): Promise<string | number> {
+    const response = await electron.protocolHandler!(new Request(`playlist-audio://playlist-image/${playlistId}`))
+    return response.status === 200 ? Buffer.from(await response.arrayBuffer()).toString() : response.status
+  }
+
+  it('saves the image the user picks, cropped to a centred square and shrunk to 512 pixels', async () => {
+    const playlist = (await invoke('playlists:list'))[0]
+    electron.openDialogResult = { canceled: false, filePaths: [png('wide.png', 1200, 800)] }
+    const updated = await invoke('playlists:choose-image', playlist.id)
+    expect(updated[0].imageVersion).toEqual(expect.any(Number))
+    expect(await coverOf(playlist.id)).toBe('jpeg 512x512 from 200,0')
+  })
+
+  it('keeps a small image at its own size', async () => {
+    const playlist = (await invoke('playlists:list'))[1]
+    electron.openDialogResult = { canceled: false, filePaths: [png('small.png', 300, 400)] }
+    await invoke('playlists:choose-image', playlist.id)
+    expect(await coverOf(playlist.id)).toBe('jpeg 300x300 from 0,50')
+  })
+
+  it('refuses a file that is not an image, keeping the cover as it was', async () => {
+    const playlist = (await invoke('playlists:list'))[2]
+    electron.openDialogResult = { canceled: false, filePaths: [join(music, 'not-an-image.png')] }
+    writeFileSync(join(music, 'not-an-image.png'), 'hello')
+    await expect(invoke('playlists:choose-image', playlist.id)).rejects.toThrow(
+      'That file couldn’t be opened as an image. Choose a JPEG or PNG.',
+    )
+    electron.openDialogResult = { canceled: false, filePaths: [join(music, 'missing.png')] }
+    await expect(invoke('playlists:choose-image', playlist.id)).rejects.toThrow('couldn’t be opened as an image')
+    expect(await coverOf(playlist.id)).toBe(404)
+  })
+
+  it('refuses an image too large in pixels to open safely, without decoding it', async () => {
+    const playlist = (await invoke('playlists:list'))[2]
+    electron.openDialogResult = { canceled: false, filePaths: [png('huge.png', 30000, 30000)] }
+    await expect(invoke('playlists:choose-image', playlist.id)).rejects.toThrow(
+      'That image is too large. Choose one under 8000 pixels across.',
+    )
+    expect(await coverOf(playlist.id)).toBe(404)
+  })
+
+  it('changes nothing when the user cancels the dialog', async () => {
+    const before = await invoke('playlists:list')
+    expect(await invoke('playlists:choose-image', before[3].id)).toEqual(before)
+  })
+
+  it('removes a chosen image', async () => {
+    const playlist = (await invoke('playlists:list'))[3]
+    electron.openDialogResult = { canceled: false, filePaths: [png('square.png', 600, 600)] }
+    await invoke('playlists:choose-image', playlist.id)
+    const updated = await invoke('playlists:remove-image', playlist.id)
+    expect(updated[3].imageVersion).toBeNull()
+    expect(await coverOf(playlist.id)).toBe(404)
+  })
+
+  it('ignores file paths sent by the window itself', async () => {
+    const playlist = (await invoke('playlists:list'))[2]
+    const updated = await invoke('playlists:choose-image', playlist.id, png('sneaky.png', 600, 600))
+    expect(updated[2].imageVersion).toBeNull()
+  })
+
+  it.each(['1', 1.5, 0, null])('rejects the playlist ID %j', async (id) => {
+    await expect(invoke('playlists:choose-image', id)).rejects.toThrow('Invalid playlist ID.')
+    await expect(invoke('playlists:remove-image', id)).rejects.toThrow('Invalid playlist ID.')
   })
 })
 

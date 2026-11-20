@@ -30,7 +30,7 @@ If the code and this file disagree, the code wins: say so, and fix this file in 
 | `src/renderer/src/SongTable.tsx`, `ExploreView.tsx`, `LibraryView.tsx` | Song lists that call back into `App`'s play actions (`playFrom`, `playLibrary`); `LibrarySource` type |
 | `src/renderer/src/TrackArt.tsx` | Artwork from `playlist-audio://artwork/<id>`, falling back to an icon |
 | `src/renderer/src/styles.css`, `playlist.css` | Player bar layout (`.player-*`); the tempo control (`.player-tempo`, `.tempo-readout`, `.tempo-reset`, `.tempo-hit`, `.tempo-track`) |
-| `src/main/audioProtocol.ts` | `registerAudioScheme()` (privileged: `standard`, `secure`, `stream`, `supportFetchAPI`, `corsEnabled`; every track response sends `Access-Control-Allow-Origin: *`) and `handleAudioRequests(getTrackFilePath)`: streams `track/<id>` with byte ranges and MIME types, and serves `artwork/<id>` |
+| `src/main/audioProtocol.ts` | `registerAudioScheme()` (privileged: `standard`, `secure`, `stream`, `supportFetchAPI`, `corsEnabled`; every track response sends `Access-Control-Allow-Origin: *`) and `handleAudioRequests(getTrackFilePath, getPlaylistImage)`: streams `track/<id>` with byte ranges and MIME types, and serves `artwork/<id>` and `playlist-image/<playlistId>` (a playlist's stored cover JPEG) |
 | `src/main/index.ts` | Registers the scheme before ready and the handler after the database opens; the add-files dialog's extension filter; `playlists:set-track-tempo` |
 | `electron.vite.config.ts` | CSP: `media-src 'self' playlist-audio:` and `img-src ... playlist-audio:` |
 | `src/renderer/src/test/setup.ts` | jsdom's stand-in for media playback |
@@ -96,7 +96,7 @@ A per-song, per-playlist speed change of ±`MAX_TEMPO_CHANGE` (10%), stored as `
 **Playback:** effect 2 above. Pitch moves with speed on purpose (see "Platform facts").
 
 ## Streaming (main)
-- URL form: `playlist-audio://track/<trackId>` and `playlist-audio://artwork/<trackId>`. Anything else → 400. The ID is resolved through `getTrackFilePath`, so only files saved in the database are served; a path is never taken from the URL.
+- URL form: `playlist-audio://track/<trackId>`, `playlist-audio://artwork/<trackId>` and `playlist-audio://playlist-image/<playlistId>` (the cover image chosen for a playlist, from the database; the window adds `?v=<imageVersion>` so a new image isn't served from cache; 404 when there is none). Anything else → 400. The ID is resolved through `getTrackFilePath`, so only files saved in the database are served; a path is never taken from the URL.
 - Supports `Range: bytes=start-end`, `start-` and `-suffix` (206 with `Content-Range`), returns 416 past the end, 404 for an unknown ID or missing file, 200 with an empty body for an empty file. Seeking depends on range support.
 - MIME types by extension: mp3 `audio/mpeg`, m4a `audio/mp4`, aac `audio/aac`, wav `audio/wav`, aiff `audio/aiff`, flac `audio/flac`, ogg and opus `audio/ogg`; anything else `application/octet-stream`.
 - Artwork is read live with `music-metadata` (`readTrackArtwork`) and isn't stored; 404 means no artwork.
@@ -141,7 +141,7 @@ Not verified; check in `npm run dev` before relying on them:
   - Also: `expectPlaying(title)`, `songLoaded(seconds)`, `playTo(seconds)`, `songEnds()`, `songFailsToLoad()`, `playerButton('Play' | 'Pause' | 'Next' | 'Previous' | 'Shuffle')`, `songButton(title)`, `songRow(title)`, `artworkButton(title)`, `volumeLeftAt(percent)`, `tempoSlider()`, `pressOnTempo(...keys)`, `queuePanel()`, `queueContents()`, `queueButton()`.
   - Add to these rather than reaching into the DOM.
 - The fake desktop takes `tempo` in song specs and implements `setTrackTempo` like main (a copied song starts at 0). Tempo saves are debounced, so assert on `desktop.saved()` inside `waitFor`, or fire `pagehide` to save at once.
-- Renderer suites: `playback.test.tsx` (play/pause, next/previous, seeking, shuffle, volume), `queue.test.tsx`, `tempo.test.tsx` ("tempo control"), `explore.test.tsx` and `library.test.tsx` (playing from those sources), `artwork.test.tsx`, `djMode.test.tsx` (see the `dj` skill). Main: `src/main/audioProtocol.test.ts` (streaming, ranges, artwork, CORS).
+- Renderer suites: `playback.test.tsx` (play/pause, next/previous, seeking, shuffle, volume), `queue.test.tsx`, `tempo.test.tsx` ("tempo control"), `explore.test.tsx` and `library.test.tsx` (playing from those sources), `artwork.test.tsx`, `djMode.test.tsx` (see the `dj` skill). Main: `src/main/audioProtocol.test.ts` (streaming, ranges, artwork, playlist cover images, CORS).
 - Assert on what's heard and shown (`player()`, labels, text), never on component state. Cover the product edge cases: empty playlist, last song, shuffle on, removed or missing songs, switching playlists, duplicates in the queue.
 
 ## Pitfalls

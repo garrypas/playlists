@@ -796,3 +796,86 @@ ul.library-grid {
   font-size: 10px;
   line-height: 1.5;
 }
+
+/* Playlist cover images: the user's chosen image fills the cover over its gradient. */
+.mini-cover,
+.playlist-heading-cover {
+  position: relative;
+  overflow: hidden;
+}
+
+.playlist-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.has-playlist-image {
+  background: #262624;
+}
+
+.mini-cover:not(.has-playlist-image) .playlist-image,
+.playlist-art:not(.has-playlist-image) .playlist-image,
+.playlist-heading-cover:not(.has-playlist-image) .playlist-image {
+  visibility: hidden;
+}
+
+.playlist-art .art-number {
+  z-index: 1;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.playlist-heading {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  min-width: 0;
+}
+
+.playlist-cover-button {
+  position: relative;
+  flex: none;
+  width: 58px;
+  height: 58px;
+  padding: 0;
+  border-radius: 6px;
+  background: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.playlist-heading-cover {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  font:
+    26px 'Manrope',
+    sans-serif;
+  color: rgba(255, 244, 217, 0.88);
+}
+
+.cover-edit-hint {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: rgba(16, 16, 15, 0.62);
+  color: #f4f3ed;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.playlist-cover-button:hover .cover-edit-hint,
+.playlist-cover-button:focus-visible .cover-edit-hint {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cover-edit-hint {
+    transition: none;
+  }
+}

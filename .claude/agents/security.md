@@ -30,7 +30,8 @@ The reference below says what to check and what the codebase does today. When yo
 | `electron.vite.config.ts` | The renderer's Content Security Policy (stricter in production than in dev) and which dependencies are bundled |
 | `src/main/index.ts` | `BrowserWindow` `webPreferences` (`contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`); denies new windows, navigation, webviews and permission requests; IPC handlers and their type validators |
 | `src/preload/index.ts` | The only API the renderer gets: one named method per call, no Electron objects, no generic `invoke`. `addDroppedFiles` turns dropped `File` objects into paths with `webUtils` |
-| `src/main/audioProtocol.ts` | `playlist-audio://` serves only files saved in the database, looked up by track ID |
+| `src/main/audioProtocol.ts` | `playlist-audio://` serves only files saved in the database, looked up by track ID, and playlist cover images stored in the database, by playlist ID |
+| `src/main/playlistImage.ts` | Decodes an image the user picked in the native dialog with `nativeImage` (refusing non-images, files over 40 MB, and images whose header claims more than 8000 px a side, checked before decoding so a small file can't make main decode gigabytes) and re-encodes it as a small JPEG, dropping metadata such as location |
 | `src/main/playlistDatabase.ts` | All SQL. Parameterised values, transactions, validation before writes, migrations |
 
 ## Rules: secrets and credentials
@@ -46,7 +47,7 @@ The reference below says what to check and what the codebase does today. When yo
 8. **Allowlist dynamic identifiers.** Placeholders can't bind column names or `ASC`/`DESC`. A sort column, direction or table name chosen at runtime must be mapped from a fixed allowlist (e.g. `const sortColumns = { title: 'title', artist: 'artist' } as const`) and the input rejected if it isn't a key; never pass the input through.
 9. **Transactions for related changes.** Writes that must succeed or fail together (multiple rows, reorders, multi-step migrations) go in `BEGIN` / `COMMIT` with `ROLLBACK` and rethrow on error, then persist once, as `addAudioFiles`, `saveTags`, `moveTrack` and `movePlaylist` do.
 10. **Validate before writing.** Types are checked at the IPC handler (`require*` in `index.ts`), ranges and existence in the database method (`requirePlaylist`, `cleanTitle`, `setTrackTempo`'s bounds). A new write needs both. Tag text is trimmed and capped in `trackMetadata.ts` before it's stored.
-11. **No raw SQL from the renderer.** The preload exposes named, typed calls only. Reject any change that adds a generic query, `exec`, `run` or "debug SQL" channel, a channel taking SQL fragments or column names unchecked, or a file path from the renderer. Paths come only from `dialog.showOpenDialog` in main, or from files the user dropped on the window:
+11. **No raw SQL from the renderer.** The preload exposes named, typed calls only. Reject any change that adds a generic query, `exec`, `run` or "debug SQL" channel, a channel taking SQL fragments or column names unchecked, or a file path from the renderer. Paths come only from `dialog.showOpenDialog` in main (songs, and playlist cover images, which are read once and stored as re-encoded bytes, never as a path), or from files the user dropped on the window:
     - The renderer passes `File` objects to the preload's `addDroppedFiles`.
     - The preload reads their paths with `webUtils.getPathForFile`, which is empty for a `File` built in page script.
     - Main's `requireDroppedAudioPaths` keeps only absolute paths to existing regular files with an audio extension (≤ 5000 per call).
@@ -60,7 +61,7 @@ The reference below says what to check and what the codebase does today. When yo
 15. Keep `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`; the window-open, navigation, webview and permission denials in `index.ts`; and the production CSP in `electron.vite.config.ts`. Loosening any of them needs a specific, stated need, and never applies to production builds just to make dev mode work.
 16. Custom protocol handlers (`audioProtocol.ts`) resolve IDs through the database and must never serve a path taken from the URL.
     - `playlist-audio:` is registered `corsEnabled` and answers `Access-Control-Allow-Origin: *`. DJ mode routes its `<audio crossOrigin="anonymous">` decks through Web Audio for the bass filters, and Web Audio hears only silence without CORS.
-    - That's acceptable only because the scheme is reachable solely from this app's own window (no navigation, popups or webviews), and it serves only saved songs and their artwork, by ID. Keep it that way, and never add credentials or cookies to it.
+    - That's acceptable only because the scheme is reachable solely from this app's own window (no navigation, popups or webviews), and it serves only saved songs, their artwork and playlist cover images, by ID. Keep it that way, and never add credentials or cookies to it.
     - `playlists:dj-details` returns one song's analysis by `requireId`'d track ID, read only.
 
 ## Checks to run for a full review

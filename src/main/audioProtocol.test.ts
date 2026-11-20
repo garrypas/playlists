@@ -22,6 +22,8 @@ let folder: string
 const files: Record<number, string> = {}
 const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489', 'hex')
 const audioBytes = Buffer.from('0123456789abcdefghij')
+const coverJpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9])
+const playlistImages: Record<number, Uint8Array> = { 7: coverJpeg }
 
 function save(trackId: number, name: string, contents: Buffer): void {
   files[trackId] = join(folder, name)
@@ -40,7 +42,10 @@ beforeAll(() => {
   save(4, 'svg-cover.mp3', mp3({ picture: { mimeType: 'image/svg+xml', data: Buffer.from('<svg/>') } }))
   save(5, 'empty.wav', Buffer.alloc(0))
   files[6] = join(folder, 'deleted.mp3')
-  handleAudioRequests((trackId) => files[trackId])
+  handleAudioRequests(
+    (trackId) => files[trackId],
+    (playlistId) => playlistImages[playlistId],
+  )
 })
 
 afterAll(() => rmSync(folder, { recursive: true, force: true }))
@@ -100,6 +105,8 @@ describe('streaming songs', () => {
     'playlist-audio://track/-1',
     'playlist-audio://track/1.5',
     'playlist-audio://other/1',
+    'playlist-audio://playlist-image/0',
+    'playlist-audio://playlist-image/abc',
     'playlist-audio://track/..%2F..%2Fetc%2Fpasswd',
   ])('rejects the malformed address %s', async (url) => {
     expect((await request(url)).status).toBe(400)
@@ -122,5 +129,19 @@ describe('song artwork', () => {
     ['a song that is not in any playlist', 99],
   ])('reports no artwork for %s', async (_case, trackId) => {
     expect((await request(`playlist-audio://artwork/${trackId}`)).status).toBe(404)
+  })
+})
+
+describe('playlist cover images', () => {
+  it('serves the image chosen for a playlist', async () => {
+    const response = await request('playlist-audio://playlist-image/7?v=3')
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Content-Type')).toBe('image/jpeg')
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(coverJpeg)
+  })
+
+  it('reports no image for a playlist without one, or one that does not exist', async () => {
+    expect((await request('playlist-audio://playlist-image/1')).status).toBe(404)
+    expect((await request('playlist-audio://playlist-image/99')).status).toBe(404)
   })
 })

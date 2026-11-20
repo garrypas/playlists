@@ -39,7 +39,9 @@ export class PlaylistDatabase {
 
   list(): Playlist[] {
     const playlists = this.query<Omit<Playlist, 'tracks'>>(
-      'SELECT id, title, description, gradient, icon FROM playlists ORDER BY position, id',
+      `SELECT playlists.id AS id, title, description, gradient, icon, playlist_images.version AS imageVersion
+      FROM playlists LEFT JOIN playlist_images ON playlist_images.playlist_id = playlists.id
+      ORDER BY position, playlists.id`,
     )
     return playlists.map((playlist) => ({
       ...playlist,
@@ -241,6 +243,34 @@ export class PlaylistDatabase {
     return this.list()
   }
 
+  // Makes `jpeg` (already cropped and shrunk by main) the playlist's cover, replacing any earlier image. The version
+  // always goes up, so the window never shows an old image it cached under the same address.
+  setPlaylistImage(id: number, jpeg: Uint8Array): Playlist[] {
+    const playlistId = this.requirePlaylist(id)
+    if (!(jpeg instanceof Uint8Array) || jpeg.length === 0) throw new Error('That image couldn’t be read.')
+    if (jpeg.length > MAX_PLAYLIST_IMAGE_BYTES) throw new Error('That image is too large to save.')
+    const latest = this.query<{ version: number | null }>('SELECT MAX(version) AS version FROM playlist_images')[0]
+    const version = Math.max(Date.now(), (latest?.version ?? 0) + 1)
+    this.run('INSERT OR REPLACE INTO playlist_images (playlist_id, image, version) VALUES (?, ?, ?)', [
+      playlistId,
+      jpeg,
+      version,
+    ])
+    this.persist()
+    return this.list()
+  }
+
+  removePlaylistImage(id: number): Playlist[] {
+    this.run('DELETE FROM playlist_images WHERE playlist_id = ?', [this.requirePlaylist(id)])
+    this.persist()
+    return this.list()
+  }
+
+  /** The playlist's chosen cover image (JPEG), or undefined when it has none. */
+  getPlaylistImage(id: number): Uint8Array | undefined {
+    return this.query<{ image: Uint8Array }>('SELECT image FROM playlist_images WHERE playlist_id = ?', [id])[0]?.image
+  }
+
   removeTrack(playlistId: number, trackId: number): Playlist[] {
     this.requirePlaylist(playlistId)
     if (!Number.isSafeInteger(trackId) || trackId < 1) throw new Error('Invalid track ID.')
@@ -311,6 +341,11 @@ export class PlaylistDatabase {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS playlist_images (
+        playlist_id INTEGER PRIMARY KEY REFERENCES playlists(id) ON DELETE CASCADE,
+        image BLOB NOT NULL,
+        version INTEGER NOT NULL
+      );
     `)
   }
 
@@ -368,6 +403,7 @@ export class PlaylistDatabase {
   // Older builds lost foreign keys after the first save, so deleted playlists could leave their songs behind.
   private removeOrphanedTracks(): void {
     this.run('DELETE FROM playlist_tracks WHERE playlist_id NOT IN (SELECT id FROM playlists)')
+    this.run('DELETE FROM playlist_images WHERE playlist_id NOT IN (SELECT id FROM playlists)')
   }
 
   private requirePlaylist(id: number): number {
@@ -440,6 +476,10 @@ const tempoDetectorVersion = 2
 // where the kick returns and the level changes. 3: where in the beat the kicks fall, chosen from every phase rather
 // than the strongest line or the half beat after it. 4: each bar's level, for choosing where to bring a song in.
 const rhythmDetectorVersion = 4
+
+// The largest cover image the database will store. Main shrinks images to a 512px JPEG (tens of kB) first; this only
+// stops a mistake from bloating the database, which is rewritten whole on every save.
+export const MAX_PLAYLIST_IMAGE_BYTES = 2 * 1024 * 1024
 
 const nextPlaylistPosition = '(SELECT COALESCE(MAX(position), -1) + 1 FROM playlists)'
 

@@ -18,6 +18,7 @@ The reference below is meant to answer most questions without reading code. When
 |---|---|
 | `src/main/playlistDatabase.ts` | The whole database: `PlaylistDatabase` class (open, schema, migration, queries, persistence), `openPlaylistDatabase(userDataPath)`, `songDetails()`, `tempoDetectorVersion`, starter playlists |
 | `src/main/playlistDatabase.test.ts` | Tests against a real sql.js database in a temp folder, including upgrading a hand-built "older version" database |
+| `src/main/playlistImage.ts` | `preparePlaylistImage()`: turns a picked image into the JPEG stored in `playlist_images` (centred square, ≤ 512 px) |
 | `src/main/trackMetadata.ts` | `TrackTags` (the tag fields written to song rows) and their cleaning (text trimmed and capped at 500 chars) |
 
 ## Engine and storage
@@ -44,6 +45,17 @@ There's no schema version number. `initializeSchema()` creates the **original** 
 | `position` | `INTEGER NOT NULL DEFAULT 0` (migrated) | Sidebar/Home order. Migration set it to `id`, so old databases keep creation order |
 
 Listed `ORDER BY position, id`.
+
+### `playlist_images`
+The image the user chose for a playlist's cover, at most one per playlist. Created in `initializeSchema()` with `CREATE TABLE IF NOT EXISTS`, so older databases get it empty.
+
+| Column | Type | Meaning |
+|---|---|---|
+| `playlist_id` | `INTEGER PRIMARY KEY REFERENCES playlists(id) ON DELETE CASCADE` | Owning playlist; deleted with it (and by `removeOrphanedTracks()` if foreign keys were ever off) |
+| `image` | `BLOB NOT NULL` | JPEG prepared by `preparePlaylistImage()` in main, typically 30–120 kB. `setPlaylistImage` refuses empty data or more than `MAX_PLAYLIST_IMAGE_BYTES` (2 MB), because every save rewrites the whole database file |
+| `version` | `INTEGER NOT NULL` | `max(Date.now(), highest saved version + 1)` at each save, so it only goes up. Exposed as `Playlist.imageVersion` and put in the image's URL, so the window never shows a cached old image |
+
+Read by `list()` (a `LEFT JOIN` for `imageVersion` only; the bytes stay out of the list) and `getPlaylistImage(id)` (the bytes, for `playlist-audio://playlist-image/<id>`). Written by `setPlaylistImage` (`INSERT OR REPLACE`) and `removePlaylistImage`.
 
 ### `playlist_tracks`
 One row per **song in a playlist** (a playlist entry). The same file in two playlists is two rows with the same `file_path`.
@@ -85,7 +97,7 @@ Key/value table (`key TEXT PRIMARY KEY, value TEXT NOT NULL`) for one-off app st
 | `rhythm_detector` | Last `rhythmDetectorVersion` applied by `redetectRhythm()` (currently 4; missing counts as 1) |
 
 ### Mapping to TypeScript
-The window sees two reads: `list()`, and `getDjDetails(trackId)` (over `playlists:dj-details`, for DJ mode, one song at a time). The `list()` `SELECT` aliases columns to the camelCase `Playlist` / `PlaylistTrack` fields in `src/shared/playlist.ts`, with tracks ordered `position, id`. `added_at`, `created_at`, `playlists.position` and the `*_read` flags are not exposed. A column the window needs must be added to that `SELECT` and to the type.
+The window sees two reads: `list()` (whose playlists carry `imageVersion` from `playlist_images`), and `getDjDetails(trackId)` (over `playlists:dj-details`, for DJ mode, one song at a time). The `list()` `SELECT` aliases columns to the camelCase `Playlist` / `PlaylistTrack` fields in `src/shared/playlist.ts`, with tracks ordered `position, id`. `added_at`, `created_at`, `playlists.position` and the `*_read` flags are not exposed. A column the window needs must be added to that `SELECT` and to the type.
 
 ## Opening sequence
 `PlaylistDatabase.open(filePath)` runs, in order:
@@ -94,7 +106,7 @@ The window sees two reads: `list()`, and `getDjDetails(trackId)` (over `playlist
 3. `migrateSchema()`: add missing `playlist_tracks` columns from the `added` map; add `playlists.position` (set to `id`).
 4. `retryMissingTempos()`: if `app_meta.tempo_detector` < `tempoDetectorVersion`, reset `tempo_read` to 0 where `bpm IS NULL`, and record the version.
 5. `redetectRhythm()`: if `app_meta.rhythm_detector` < `rhythmDetectorVersion`, reset `dj_read` to 0 on every row, and record the version. `bpm` and `dj_details` stay until `saveRhythm` replaces them.
-6. `removeOrphanedTracks()`: delete tracks whose playlist is gone (older builds lost foreign keys after the first save).
+6. `removeOrphanedTracks()`: delete tracks and playlist images whose playlist is gone (older builds lost foreign keys after the first save).
 7. `seedStarterPlaylists()`: once ever, in a transaction.
 8. `persist()`.
 
@@ -108,7 +120,7 @@ Then `index.ts` saves tags for `filesNeedingTags()`, creates the window, and sta
 - Always use `?` parameters for values. The only interpolated SQL is the constant `nextPlaylistPosition` subquery and column definitions from the `added` map.
 
 ## Tests
-- `src/main/playlistDatabase.test.ts`: each test opens a fresh database in a `mkdtempSync` folder; `reopen()` closes and reopens it to prove a change survived a restart. Describes: starter playlists, creating, renaming, deleting, songs, adding a saved song to another playlist, reordering songs, saving, song details from tags (including "upgrades a database saved by an older version": it builds the original schema by hand with `initSqlJs()`, writes it to disk and opens it), song tempo, DJ details (once per file, shared and copied, found for songs saved earlier; `rhythm(bpm)` builds a scan result), song tempo change, song key, ordering playlists.
+- `src/main/playlistDatabase.test.ts`: each test opens a fresh database in a `mkdtempSync` folder; `reopen()` closes and reopens it to prove a change survived a restart. Describes: starter playlists, creating, renaming, deleting, songs, adding a saved song to another playlist, reordering songs, saving, song details from tags (including "upgrades a database saved by an older version": it builds the original schema by hand with `initSqlJs()`, writes it to disk and opens it), song tempo, DJ details (once per file, shared and copied, found for songs saved earlier; `rhythm(bpm)` builds a scan result), song tempo change, song key, ordering playlists, playlist cover images (saved per playlist, replaced with a higher version, removed, deleted with the playlist, size limits). The "older version" test also checks that old playlists start with no image and can be given one.
 - New schema work should add: behavior on a fresh database, survival across `reopen()`, and an extension of the "older version" test proving old databases upgrade and keep their data.
 
 ## Pitfalls
@@ -121,6 +133,7 @@ Then `index.ts` saves tags for `filesNeedingTags()`, creates the window, and sta
 - **One-off data fixes** (like `retryMissingTempos`) are guarded by an `app_meta` key so they run once; add a new key or version constant rather than running them on every launch.
 - **Untrusted input never becomes SQL.** Values go through `?`; a runtime-chosen column or sort direction is mapped from a fixed allowlist. Tag text read from files counts as untrusted.
 - **Keep user data.** Never drop tables, delete the database file or reset `userData` as a shortcut. A migration that rewrites or deletes data copies `playlists.sqlite3` to a backup first and runs in a transaction. The full rules are in `.claude/agents/security.md`.
+- **BLOBs** bind and come back as `Uint8Array`. Keep them out of `list()`, which is pushed to the window after every background result.
 - **sql.js returns numbers for INTEGER and REAL**, `null` for NULL, and there's no boolean type; flags are 0/1.
 
 ## Adding a column

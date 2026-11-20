@@ -362,3 +362,16 @@ export async function dropFiles(target: HTMLElement, names: string[]): Promise<v
   fireEvent.drop(target, draggedFiles(names))
   await act(async () => {})
 }
+
+/** The cover images shown for a playlist (sidebar, Home grid, heading), at the address of its current image. */
+export function playlistImages(title: string): HTMLImageElement[] {
+  const playlist = current.saved().find((item) => item.title === title)!
+  if (!playlist.imageVersion) return []
+  const source = `playlist-audio://playlist-image/${playlist.id}?v=${playlist.imageVersion}`
+  return [...document.querySelectorAll<HTMLImageElement>('img')].filter((image) => image.getAttribute('src') === source)
+}
+
+/** Every playlist cover image on screen, whichever playlist it belongs to. */
+export function anyPlaylistImages(): HTMLImageElement[] {
+  return [...document.querySelectorAll<HTMLImageElement>('img[src^="playlist-audio://playlist-image/"]')]
+}

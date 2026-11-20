@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AudioLines, Check, Pause, Play, Plus } from 'lucide-react'
 import type { Playlist } from '../../shared/playlist'
 import { TrackArt } from './TrackArt'
+import { PlaylistCover } from './PlaylistCover'
 import { coverColors, formatBpm, formatDuration, formatKey, type LibrarySong } from './trackDisplay'
 
 export interface SongTableProps {
@@ -140,9 +141,7 @@ export function SongTable({
                           title={added ? `Already in ${playlist.title}` : undefined}
                           onClick={() => void addToPlaylist(song, playlist)}
                         >
-                          <span className={`mini-cover ${playlist.gradient}`} aria-hidden="true">
-                            {playlist.icon}
-                          </span>
+                          <PlaylistCover playlist={playlist} className="mini-cover" />
                           <span className="playlist-menu-title">{playlist.title}</span>
                           {added && (
                             <>

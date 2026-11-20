@@ -6,7 +6,8 @@ import { readTrackArtwork } from './trackMetadata'
 
 // The sandboxed renderer can't read local files, so audio is streamed through this scheme.
 // URLs look like playlist-audio://track/<trackId>, or playlist-audio://artwork/<trackId> for the
-// cover embedded in that file. Only tracks saved in a playlist can be served.
+// cover embedded in that file. Only tracks saved in a playlist can be served. playlist-audio://playlist-image/<playlistId>
+// serves the cover image the user chose for a playlist (a JPEG kept in the database).
 export const AUDIO_SCHEME = 'playlist-audio'
 
 const mimeTypes: Record<string, string> = {
@@ -35,13 +36,20 @@ export function registerAudioScheme(): void {
 // saved in a playlist, so any origin may read them.
 const CORS_HEADERS = { 'Access-Control-Allow-Origin': '*' }
 
-export function handleAudioRequests(getTrackFilePath: (trackId: number) => string | undefined): void {
+const ROUTES = new Set(['track', 'artwork', 'playlist-image'])
+
+export function handleAudioRequests(
+  getTrackFilePath: (trackId: number) => string | undefined,
+  getPlaylistImage: (playlistId: number) => Uint8Array | undefined,
+): void {
   protocol.handle(AUDIO_SCHEME, (request) => {
     const url = new URL(request.url)
-    const trackId = Number(url.pathname.slice(1))
-    if ((url.hostname !== 'track' && url.hostname !== 'artwork') || !Number.isSafeInteger(trackId) || trackId < 1) {
+    const id = Number(url.pathname.slice(1))
+    if (!ROUTES.has(url.hostname) || !/^\/\d+$/.test(url.pathname) || !Number.isSafeInteger(id) || id < 1) {
       return new Response(null, { status: 400 })
     }
+    if (url.hostname === 'playlist-image') return playlistImageResponse(getPlaylistImage(id))
+    const trackId = id
     if (url.hostname === 'artwork') return artworkResponse(getTrackFilePath(trackId))
 
     const filePath = getTrackFilePath(trackId)
@@ -82,6 +90,15 @@ export function handleAudioRequests(getTrackFilePath: (trackId: number) => strin
         'Content-Range': `bytes ${start}-${end}/${size}`,
       },
     })
+  })
+}
+
+// 404 means "no image": the playlist shows its gradient and symbol instead.
+function playlistImageResponse(image: Uint8Array | undefined): Response {
+  if (!image) return new Response(null, { status: 404 })
+  return new Response(image.slice(), {
+    status: 200,
+    headers: { 'Content-Type': 'image/jpeg', 'Content-Length': String(image.length) },
   })
 }
 

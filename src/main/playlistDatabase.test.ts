@@ -20,6 +20,9 @@ afterEach(() => {
   rmSync(userData, { recursive: true, force: true })
 })
 
+// Stands in for the cover image main prepares (a small JPEG).
+const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9])
+
 function titles(): string[] {
   return db.list().map((playlist) => playlist.title)
 }
@@ -355,6 +358,11 @@ describe('song details from tags', () => {
     // Playlists keep their creation order, and new ones go after them.
     db.create({ title: 'Newer' })
     expect(titles()).toEqual(['Old favourites', 'Newer'])
+    // Playlists from before cover images could be chosen have none, and can be given one.
+    expect(db.list()[0].imageVersion).toBeNull()
+    db.setPlaylistImage(db.list()[0].id, jpeg)
+    await reopen()
+    expect(db.getPlaylistImage(db.list()[0].id)).toEqual(jpeg)
   })
 })
 
@@ -585,5 +593,57 @@ describe('ordering playlists', () => {
   it('reports a playlist that no longer exists, or a bad position', () => {
     expect(() => db.movePlaylist(9999, 0)).toThrow('Playlist not found.')
     expect(() => db.movePlaylist(db.list()[0].id, -1)).toThrow('Invalid playlist position.')
+  })
+})
+
+describe('playlist cover images', () => {
+  it('has none until the user chooses one', () => {
+    expect(db.list().every((playlist) => playlist.imageVersion === null)).toBe(true)
+    expect(db.getPlaylistImage(db.list()[0].id)).toBeUndefined()
+  })
+
+  it('saves the chosen image for that playlist only, and keeps it after a restart', async () => {
+    const [first, second] = db.list()
+    const playlists = db.setPlaylistImage(second.id, jpeg)
+    expect(playlists.find((playlist) => playlist.id === second.id)!.imageVersion).toEqual(expect.any(Number))
+    expect(playlists.find((playlist) => playlist.id === first.id)!.imageVersion).toBeNull()
+    await reopen()
+    expect(db.getPlaylistImage(second.id)).toEqual(jpeg)
+    expect(db.getPlaylistImage(first.id)).toBeUndefined()
+  })
+
+  it('replaces an earlier image with a new version, so the window never shows the old one', () => {
+    const { id } = db.list()[0]
+    const before = db.setPlaylistImage(id, jpeg)[0].imageVersion!
+    const replacement = new Uint8Array([0xff, 0xd8, 9, 9, 0xff, 0xd9])
+    const after = db.setPlaylistImage(id, replacement)[0].imageVersion!
+    expect(after).toBeGreaterThan(before)
+    expect(db.getPlaylistImage(id)).toEqual(replacement)
+  })
+
+  it('removes the image, going back to the gradient cover', async () => {
+    const { id } = db.list()[0]
+    db.setPlaylistImage(id, jpeg)
+    expect(db.removePlaylistImage(id)[0].imageVersion).toBeNull()
+    await reopen()
+    expect(db.getPlaylistImage(id)).toBeUndefined()
+  })
+
+  it('deletes the image with its playlist', async () => {
+    const created = db.create({ title: 'Gym' })
+    const { id } = created[created.length - 1]
+    db.setPlaylistImage(id, jpeg)
+    db.remove(id)
+    await reopen()
+    expect(db.getPlaylistImage(id)).toBeUndefined()
+  })
+
+  it('refuses an unknown playlist, and an empty or oversized image', () => {
+    const { id } = db.list()[0]
+    expect(() => db.setPlaylistImage(999, jpeg)).toThrow('Playlist not found.')
+    expect(() => db.removePlaylistImage(999)).toThrow('Playlist not found.')
+    expect(() => db.setPlaylistImage(id, new Uint8Array())).toThrow('That image couldn’t be read.')
+    expect(() => db.setPlaylistImage(id, new Uint8Array(3 * 1024 * 1024))).toThrow('That image is too large to save.')
+    expect(db.list()[0].imageVersion).toBeNull()
   })
 })

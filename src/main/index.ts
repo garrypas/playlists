@@ -1,10 +1,11 @@
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron'
 import { stat } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
-import { AUDIO_EXTENSIONS, isAudioFileName, MAX_TEMPO_CHANGE, type CreatePlaylistInput } from '../shared/playlist'
+import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, isAudioFileName, MAX_TEMPO_CHANGE, type CreatePlaylistInput } from '../shared/playlist'
 import { handleAudioRequests, registerAudioScheme } from './audioProtocol'
 import { openPlaylistDatabase, PlaylistDatabase } from './playlistDatabase'
 import { readTagsForFiles } from './trackMetadata'
+import { preparePlaylistImage } from './playlistImage'
 import { analyseInWorker, createBackgroundScanner } from './backgroundAnalysis'
 
 registerAudioScheme()
@@ -174,6 +175,19 @@ ipcMain.handle('playlists:add-dropped-files', async (_event, id: unknown, paths:
   return playlists
 })
 
+ipcMain.handle('playlists:choose-image', async (_event, id: unknown) => {
+  const playlistId = requireId(id, 'playlist')
+  const result = await dialog.showOpenDialog({
+    properties: ['openFile'],
+    filters: [{ name: 'Images', extensions: [...IMAGE_EXTENSIONS] }],
+  })
+  if (result.canceled || result.filePaths.length === 0) return playlistDatabase.list()
+  return playlistDatabase.setPlaylistImage(playlistId, await preparePlaylistImage(result.filePaths[0]))
+})
+ipcMain.handle('playlists:remove-image', (_event, id: unknown) =>
+  playlistDatabase.removePlaylistImage(requireId(id, 'playlist')),
+)
+
 // The app never needs popups, external navigation, or device permissions.
 app.on('web-contents-created', (_event, contents) => {
   contents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -192,7 +206,10 @@ app.whenReady().then(async () => {
     playlistDatabase = await openPlaylistDatabase(app.getPath('userData'))
     // Songs added before tags were read (or whose files were unreadable last time) get their tags now.
     playlistDatabase.saveTags(await readTagsForFiles(playlistDatabase.filesNeedingTags()))
-    handleAudioRequests((trackId) => playlistDatabase.getTrackFilePath(trackId))
+    handleAudioRequests(
+      (trackId) => playlistDatabase.getTrackFilePath(trackId),
+      (playlistId) => playlistDatabase.getPlaylistImage(playlistId),
+    )
     createWindow()
     // Songs whose tempo, DJ details or key weren't found last time (added just before quitting, saved by an older
     // version, or unreadable) are scanned again.

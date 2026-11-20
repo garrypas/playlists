@@ -33,6 +33,8 @@ const desktopApi = {
       ipcRenderer.invoke('playlists:set-track-tempo', trackId, percent),
     djDetails: (trackId: number): Promise<DjDetails | null> => ipcRenderer.invoke('playlists:dj-details', trackId),
     move: (id: number, toIndex: number): Promise<Playlist[]> => ipcRenderer.invoke('playlists:move', id, toIndex),
+    chooseImage: (id: number): Promise<Playlist[]> => ipcRenderer.invoke('playlists:choose-image', id),
+    removeImage: (id: number): Promise<Playlist[]> => ipcRenderer.invoke('playlists:remove-image', id),
     onChanged: (listener: (playlists: Playlist[]) => void): (() => void) => {
       const handler = (_event: IpcRendererEvent, playlists: Playlist[]): void => listener(playlists)
       ipcRenderer.on('playlists:changed', handler)

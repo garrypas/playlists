@@ -16,18 +16,20 @@ The reference below is meant to answer most questions without reading code. When
 ## Files
 | File | Role |
 |---|---|
-| `src/shared/playlist.ts` | The contract shared by main, preload and renderer: `Playlist`, `PlaylistTrack`, `CreatePlaylistInput`, `PlaylistApi`, `MAX_TEMPO_CHANGE` |
+| `src/shared/playlist.ts` | The contract shared by main, preload and renderer: `Playlist` (including `imageVersion`), `PlaylistTrack`, `CreatePlaylistInput`, `PlaylistApi`, `MAX_TEMPO_CHANGE`, `AUDIO_EXTENSIONS`, `IMAGE_EXTENSIONS` |
 | `src/main/playlistDatabase.ts` | `PlaylistDatabase`'s public methods (the data API itself), their range/existence validation and user-facing error messages |
 | `src/main/index.ts` | The `playlists:*` IPC handlers and their type validators (`requireId`, `requireIndex`, `requireTempo`, `requireString`, `requireCreatePlaylistInput`); `sendPlaylistsToWindows()` on `playlists:changed`; the native dialog for adding files |
 | `src/main/index.test.ts` | The real IPC handlers with Electron stubbed |
-| `src/main/audioProtocol.ts` | Resolves `playlist-audio://track/<id>` and `artwork/<id>` to a file through `getTrackFilePath`; the only way the window reads song files |
+| `src/main/audioProtocol.ts` | Resolves `playlist-audio://track/<id>` and `artwork/<id>` to a file through `getTrackFilePath`, and `playlist-image/<playlistId>` to the stored cover through `getPlaylistImage`; the only way the window reads song files or cover images |
+| `src/main/playlistImage.ts` | `preparePlaylistImage(filePath)`: decodes the picked file with Electron's `nativeImage`, crops a centred square, shrinks it to ≤ 512 px and returns JPEG bytes; user-facing errors for unreadable files, files over 40 MB, and images over 8000 px a side (`imageDimensions` reads the size from the PNG/JPEG header before decoding; unit-tested in `playlistImage.test.ts`) |
 | `src/preload/index.ts` | `window.desktop.playlists`: one `ipcRenderer.invoke` per `PlaylistApi` method (`satisfies PlaylistApi`), plus `onChanged`; `DesktopApi` type |
 | `src/renderer/src/test/fakeDesktop.ts` | In-memory stand-in for main used by renderer tests; must follow the same contract |
 
 ## The contract
 - **Full list, every time.** Every mutating method (all but `list` and the read-only `djDetails`) returns `Promise<Playlist[]>`: the whole, updated list from `PlaylistDatabase.list()`. The renderer replaces its state with it; there are no partial updates or patches.
 - **Background changes are pushed.** When main changes data on its own (a detected BPM or key), it sends the full list on `playlists:changed`. `onChanged(listener)` subscribes and returns an unsubscribe function. The renderer applies it the same way as a call result.
-- **Songs are referred to by track `id`, never by path.** Only two calls introduce paths:
+- **Songs are referred to by track `id`, never by path.** Only three calls introduce paths:
+  - `chooseImage(playlistId)`: the image path comes from the native dialog inside main, and is only read, never stored (the re-encoded bytes are).
   - `addAudioFiles(playlistId)`: the paths come from the native dialog inside main.
   - `addDroppedFiles(playlistId, files)`: the window passes the dropped `File` objects, and the preload reads their paths with `webUtils.getPathForFile`. A `File` built in page script has no path, so it's left out. Main checks every path again.
 - **Errors** are thrown as `Error` with a user-facing message (e.g. "Playlist names must be 1–100 characters.", "Song not found."). Electron wraps them in the renderer's rejected promise; the renderer shows them, and tests assert on them.
@@ -47,24 +49,26 @@ The reference below is meant to answer most questions without reading code. When
 | `moveTrack(playlistId, trackId, toIndex)` | `playlists:move-track` | `requireId` ×2, `requireIndex` | `moveTrack(...)` | Moves within the playlist, clamped; "Song not found." if it isn't there |
 | `setTrackTempo(trackId, percent)` | `playlists:set-track-tempo` | `requireId`, `requireTempo` | `setTrackTempo(trackId, percent)` | One entry's tempo change, ±`MAX_TEMPO_CHANGE`, rounded to 0.1 |
 | `djDetails(trackId)` | `playlists:dj-details` | `requireId` | `getDjDetails(trackId)` | Read only, so it returns the song's `DjDetails` (`src/shared/djDetails.ts`), not the list. Null until analysed, or for an unknown ID. Kept out of `list()` because they're 0.5–3 kB per file; DJ mode asks for the playing and next songs only |
+| `chooseImage(id)` | `playlists:choose-image` | `requireId` | `setPlaylistImage(id, jpeg)` | Shows the native dialog (`IMAGE_EXTENSIONS`: jpg, jpeg, png; one file), prepares the image with `preparePlaylistImage` ("That file couldn’t be opened as an image. Choose a JPEG or PNG.", "That image is too large. Choose one under 40 MB.", and, from the PNG or JPEG header before decoding, "That image is too large. Choose one under 8000 pixels across.") and saves it as the playlist's cover with a new `imageVersion`. Cancel returns the list unchanged. Extra arguments from the window are ignored |
+| `removeImage(id)` | `playlists:remove-image` | `requireId` | `removePlaylistImage(id)` | Clears the cover image (`imageVersion` null); a no-op if there is none |
 | `onChanged(listener)` | `playlists:changed` (main → window) | — | — | Full list after background updates |
 
 `window.desktop.getAppInfo()` (`app:get-info`: name, version, platform) is the only other call on the bridge.
 
-**Main-only methods** (no IPC): `filesNeedingTags`/`saveTags` (launch), `filesNeedingRhythm`/`saveRhythm` (BPM and DJ details) and `filesNeedingKey`/`saveKey` (background scanners, followed by `sendPlaylistsToWindows()`), `getTrackFilePath` (audio protocol), `close` (`before-quit`).
+**Main-only methods** (no IPC): `filesNeedingTags`/`saveTags` (launch), `filesNeedingRhythm`/`saveRhythm` (BPM and DJ details) and `filesNeedingKey`/`saveKey` (background scanners, followed by `sendPlaylistsToWindows()`), `getTrackFilePath` and `getPlaylistImage` (audio protocol), `close` (`before-quit`).
 
 ## Validation
 It happens twice, and both layers stay:
 1. **IPC handler** (`index.ts`): arguments arrive as `unknown`. `requireId` (safe integer ≥ 1, "Invalid <label> ID."), `requireIndex` (safe integer ≥ 0, "Invalid <label> position."), `requireTempo` (finite, within ±`MAX_TEMPO_CHANGE`, "Invalid tempo."), `requireString`, `requireCreatePlaylistInput` (object with string `title`, optional string `description`).
-2. **Database method**: ranges, existence and cleaning: `requirePlaylist` ("Invalid playlist ID." / "Playlist not found."), track ID checks, "Song not found.", `cleanTitle`, `cleanDescription`.
+2. **Database method**: ranges, existence and cleaning: `requirePlaylist` ("Invalid playlist ID." / "Playlist not found."), track ID checks, "Song not found.", `cleanTitle`, `cleanDescription`, `setPlaylistImage`'s empty and 2 MB checks.
 
 ## Ordering
 Playlists and tracks both have a `position`. New items go at max + 1; moves splice in memory and renumber every item 0..n-1 in one transaction; deletes leave gaps. Reads order by `position, id`, so gaps and ties are harmless.
 
 ## Tests
-- `src/main/index.test.ts`: imports the real `./index` with `electron` mocked (dialog results via `electron.openDialogResult`, `userData` in a temp folder) and `./backgroundAnalysis` mocked so detection runs on the test thread. Seeds a database with `openPlaylistDatabase` before import to simulate an older version's data. Covers handler validation and background pushes on `playlists:changed`.
+- `src/main/index.test.ts`: imports the real `./index` with `electron` mocked (dialog results via `electron.openDialogResult`, `userData` in a temp folder) and `./backgroundAnalysis` mocked so detection runs on the test thread. Seeds a database with `openPlaylistDatabase` before import to simulate an older version's data. Covers handler validation and background pushes on `playlists:changed`. Electron's `nativeImage` is stubbed (it reads a PNG header's size and "encodes" a JPEG naming its crop and size), and the registered protocol handler is captured, so the playlist-image tests read the saved cover back through `playlist-audio://playlist-image/<id>`.
 - `src/main/playlistDatabase.test.ts`: each method's behavior and error messages against a real database (see `dba.md`).
-- Renderer tests never touch main. `fakeDesktop.ts` implements `DesktopApi` in memory: every change returns the full list, duplicates in a playlist are ignored, a copied song starts at tempo 0. Helpers: `pickFiles(paths)` (next dialog result; empty means cancel), `failNext(channel, message)` (next call rejects like Electron); `addDroppedFiles` treats each `File` as `/music/<name>` and, like main, skips names that aren't audio and files already in the playlist. `test/app.tsx` has `dropFiles(target, names)`, `dragFilesOver`, `dragFilesAway` and `playlistSongsArea(title)` (the open playlist's song list, a region named after it), `tempoDetected` / `keyDetected` / `djDetailsFound` (simulate `playlists:changed`), `saved()`, `idOf(title)`, `calls`. Song specs take `dj` (a `DjDetails`, kept per file path like main) for `djDetails`.
+- Renderer tests never touch main. `fakeDesktop.ts` implements `DesktopApi` in memory: every change returns the full list, duplicates in a playlist are ignored, a copied song starts at tempo 0, and `chooseImage` takes the next `pickFiles` result (empty cancels), refuses names not ending in .jpg/.jpeg/.png with main's message, and bumps `imageVersion`. Helpers: `pickFiles(paths)` (next dialog result; empty means cancel), `failNext(channel, message)` (next call rejects like Electron); `addDroppedFiles` treats each `File` as `/music/<name>` and, like main, skips names that aren't audio and files already in the playlist. `test/app.tsx` has `dropFiles(target, names)`, `dragFilesOver`, `dragFilesAway` and `playlistSongsArea(title)` (the open playlist's song list, a region named after it), `tempoDetected` / `keyDetected` / `djDetailsFound` (simulate `playlists:changed`), `saved()`, `idOf(title)`, `calls`, `playlistImages(title)` and `anyPlaylistImages()` (the cover images on screen). Song specs take `dj` (a `DjDetails`, kept per file path like main) for `djDetails`.
 
 ## Pitfalls
 - **Never accept a path over IPC.** Take a track or playlist ID and look the path up in main (`getTrackFilePath`). The one exception is `playlists:add-dropped-files`. The window can only hand the preload `File` objects, never path strings, and main still checks each path (absolute, audio extension, an existing regular file) and only ever reads the file.

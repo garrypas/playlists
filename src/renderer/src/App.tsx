@@ -6,6 +6,7 @@ import {
   Headphones,
   Heart,
   Home,
+  ImagePlus,
   Library,
   ListMusic,
   ListPlus,
@@ -43,6 +44,7 @@ import {
 import { ExploreView } from './ExploreView'
 import { LibraryView, type LibrarySource } from './LibraryView'
 import { NameDialog } from './NameDialog'
+import { PlaylistCover } from './PlaylistCover'
 import { TrackArt } from './TrackArt'
 import {
   coverColors,
@@ -924,6 +926,24 @@ function App() {
     setNameDialog(null)
   }
 
+  async function choosePlaylistImage(): Promise<void> {
+    if (!selectedPlaylist) return
+    try {
+      setPlaylists(await window.desktop.playlists.chooseImage(selectedPlaylist.id))
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Could not save the image.')
+    }
+  }
+
+  async function removePlaylistImage(): Promise<void> {
+    if (!selectedPlaylist) return
+    try {
+      setPlaylists(await window.desktop.playlists.removeImage(selectedPlaylist.id))
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Could not remove the image.')
+    }
+  }
+
   async function deletePlaylist(): Promise<void> {
     if (!selectedPlaylist || !window.confirm(`Delete “${selectedPlaylist.title}” and its saved songs?`)) return
     try {
@@ -1269,9 +1289,7 @@ function App() {
                   }}
                   onDragEnd={endPlaylistDrag}
                 >
-                  <span className={`mini-cover ${playlist.gradient}`} aria-hidden="true">
-                    {playlist.icon}
-                  </span>
+                  <PlaylistCover playlist={playlist} className="mini-cover" />
                   <span>{playlist.title}</span>
                 </button>
               </li>
@@ -1359,10 +1377,9 @@ function App() {
                     className={`playlist-card ${selectedPlaylist?.id === playlist.id ? 'selected-card' : ''}`}
                     onClick={() => selectPlaylist(playlist)}
                   >
-                    <span className={`playlist-art ${playlist.gradient}`}>
-                      <span className="art-symbol">{playlist.icon}</span>
+                    <PlaylistCover playlist={playlist} className="playlist-art" symbolClassName="art-symbol">
                       <span className="art-number">{String(index + 1).padStart(2, '0')}</span>
-                    </span>
+                    </PlaylistCover>
                     <span className="card-copy">
                       <strong>{playlist.title}</strong>
                       <span>
@@ -1395,9 +1412,24 @@ function App() {
                 </p>
               )}
               <div className="section-title-row track-heading">
-                <div>
-                  <p className="eyebrow">SAVED ON THIS DEVICE</p>
-                  <h2 id="playlist-songs-heading">{selectedPlaylist ? selectedPlaylist.title : 'Choose a playlist'}</h2>
+                <div className="playlist-heading">
+                  {selectedPlaylist && (
+                    <button
+                      className="playlist-cover-button"
+                      aria-label={`${selectedPlaylist.imageVersion ? 'Change' : 'Choose'} image for ${selectedPlaylist.title}`}
+                      title={selectedPlaylist.imageVersion ? 'Change the cover image' : 'Choose a cover image from this computer'}
+                      onClick={() => void choosePlaylistImage()}
+                    >
+                      <PlaylistCover playlist={selectedPlaylist} className="playlist-heading-cover" />
+                      <span className="cover-edit-hint" aria-hidden="true">
+                        <ImagePlus size={18} />
+                      </span>
+                    </button>
+                  )}
+                  <div>
+                    <p className="eyebrow">SAVED ON THIS DEVICE</p>
+                    <h2 id="playlist-songs-heading">{selectedPlaylist ? selectedPlaylist.title : 'Choose a playlist'}</h2>
+                  </div>
                 </div>
                 <div className="playlist-actions">
                   <label className="search-field">
@@ -1425,6 +1457,15 @@ function App() {
                   >
                     Rename
                   </button>
+                  {!!selectedPlaylist?.imageVersion && (
+                    <button
+                      className="small-action icon-action"
+                      title="Go back to the playlist's original cover"
+                      onClick={() => void removePlaylistImage()}
+                    >
+                      Remove image
+                    </button>
+                  )}
                   <button
                     className="small-action icon-action danger-action"
                     title="Delete this playlist"

@@ -26,7 +26,7 @@ export interface FakeDesktop {
   saved: () => Playlist[]
   idOf: (songTitle: string) => number
   titleOf: (songId: number) => string | undefined
-  /** Files the system file dialog will return next; empty means the user cancels. */
+  /** Files the system file dialog (for songs or a playlist image) will return next; empty means the user cancels. */
   pickFiles: (paths: string[]) => void
   /** The main process finished detecting a song's tempo and tells the window (`bpm` undefined: no steady beat). */
   tempoDetected: (songTitle: string, bpm: number | undefined) => void
@@ -45,6 +45,7 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
   let nextTrackId = 1
   const allTitles = new Map<number, string>()
   let picked: string[] = []
+  let imageVersion = 0
   let failure: { channel: string; message: string } | null = null
   const calls: string[] = []
   const changeListeners = new Set<(playlists: Playlist[]) => void>()
@@ -91,6 +92,7 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
     description: '',
     gradient: 'sage',
     icon: '♫',
+    imageVersion: null,
     tracks: songs.map((song, position) => track(song, position)),
   }))
 
@@ -123,6 +125,7 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
             description: input.description ?? '',
             gradient: 'sage',
             icon: '♫',
+            imageVersion: null,
             tracks: [],
           })
         }),
@@ -198,6 +201,20 @@ export function createFakeDesktop(playlists: { title: string; songs?: SongSpec[]
           playlist.tracks.forEach((item, position) => {
             item.position = position
           })
+        }),
+      // Like main, the picked file becomes the cover only if it is an image; anything else is refused.
+      chooseImage: (id) =>
+        call('playlists:choose-image', () => {
+          const playlist = find(id)
+          const [path] = picked
+          picked = []
+          if (!path) return
+          if (!/\.(jpe?g|png)$/i.test(path)) throw new Error('That file couldn’t be opened as an image. Choose a JPEG or PNG.')
+          playlist.imageVersion = ++imageVersion
+        }),
+      removeImage: (id) =>
+        call('playlists:remove-image', () => {
+          find(id).imageVersion = null
         }),
       onChanged: (listener) => {
         changeListeners.add(listener)
